@@ -76,10 +76,10 @@ jobs:
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
           export STRIP="$TOOLCHAIN/llvm-strip"
 
-          export CFLAGS="-fPIC -O2 -ftls-model=initial-exec -Wl,-z,max-page-size=16384"
-          export LDFLAGS="-fPIC -pie -Wl,-z,max-page-size=16384 -Wl,--no-plt -ldl"
+          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic -Wl,-z,max-page-size=16384"
+          export LDFLAGS="-fPIC -pie -Wl,-z,max-page-size=16384 -ldl"
 
-          ./Configure "$OPENSSL_TARGET" no-shared no-tests -D__ANDROID_API__=$API --prefix="$BUILD_ROOT/openssl_install"
+          ./Configure "$OPENSSL_TARGET" no-shared no-tests no-threads no-async -D__ANDROID_API__=$API --prefix="$BUILD_ROOT/openssl_install"
           make -j$(nproc)
           make install_sw
 
@@ -99,7 +99,7 @@ jobs:
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
           export STRIP="$TOOLCHAIN/llvm-strip"
 
-          export CFLAGS="-fPIC -O2 -ftls-model=initial-exec -Wl,-z,max-page-size=16384"
+          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic -Wl,-z,max-page-size=16384"
           export LDFLAGS="-fPIC -pie -Wl,-z,max-page-size=16384"
 
           ./configure \
@@ -125,8 +125,8 @@ jobs:
 
           ./autogen.sh
 
-          export CFLAGS="-fPIC -O2 -ftls-model=initial-exec -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include -Wl,-z,max-page-size=16384"
-          export LDFLAGS="-fPIC -pie -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib -ldl -Wl,--no-plt"
+          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include -Wl,-z,max-page-size=16384"
+          export LDFLAGS="-fPIC -pie -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib -ldl"
           export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
           export AR="$TOOLCHAIN/llvm-ar"
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
@@ -155,7 +155,7 @@ jobs:
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
           export STRIP="$TOOLCHAIN/llvm-strip"
 
-          export CFLAGS="-fPIC -O2 -ftls-model=initial-exec -Wl,-z,max-page-size=16384"
+          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic -Wl,-z,max-page-size=16384"
           export LDFLAGS="-fPIC -pie -Wl,-z,max-page-size=16384"
 
           ./configure --static --prefix="$BUILD_ROOT/zlib_install"
@@ -172,8 +172,8 @@ jobs:
 
           ./autogen.sh
 
-          export CFLAGS="-fPIC -O2 -ftls-model=initial-exec -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/libevent_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include -Wl,-z,max-page-size=16384"
-          export LDFLAGS="-fPIC -pie -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/libevent_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib -ldl -Wl,--no-plt"
+          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/libevent_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include -Wl,-z,max-page-size=16384"
+          export LDFLAGS="-fPIC -pie -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/libevent_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib -ldl"
           export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
           export CXX="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang++"
           export AR="$TOOLCHAIN/llvm-ar"

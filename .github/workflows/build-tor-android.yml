@@ -62,9 +62,6 @@ jobs:
           echo "RANLIB=$TOOLCHAIN/llvm-ranlib" >> $GITHUB_ENV
           echo "STRIP=$TOOLCHAIN/llvm-strip" >> $GITHUB_ENV
 
-          echo "CFLAGS=-fPIC -O2 -fPIE -ftls-model=global-dynamic" >> $GITHUB_ENV
-          echo "LDFLAGS=-fPIC -pie -ldl" >> $GITHUB_ENV
-
       - name: Build OpenSSL
         env:
           PATH: ${{ env.TOOLCHAIN }}:/usr/bin:/bin
@@ -79,9 +76,10 @@ jobs:
           export AR="$TOOLCHAIN/llvm-ar"
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
           export STRIP="$TOOLCHAIN/llvm-strip"
+          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic"
+          export LDFLAGS="-fPIC -pie -ldl"
 
           ./Configure "$OPENSSL_TARGET" no-shared no-tests -D__ANDROID_API__=$API --prefix="$BUILD_ROOT/openssl_install"
-
           make -j$(nproc)
           make install_sw
 
@@ -111,9 +109,7 @@ jobs:
             --disable-lzmadec \
             --disable-lzmainfo \
             --disable-scripts \
-            --disable-nls \
-            CFLAGS="$CFLAGS" \
-            LDFLAGS="$LDFLAGS"
+            --disable-nls
 
           make -j$(nproc)
           make install
@@ -125,13 +121,13 @@ jobs:
           cd libevent
 
           ./autogen.sh
+          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic -I$BUILD_ROOT/openssl_install/include"
+          export LDFLAGS="-fPIC -pie -L$BUILD_ROOT/openssl_install/lib"
           ./configure \
             --host="$HOST_TRIPLE" \
             --prefix="$BUILD_ROOT/libevent_install" \
             --disable-shared \
-            --enable-static \
-            CFLAGS="$CFLAGS -I$BUILD_ROOT/openssl_install/include -D__ANDROID_API__=$API" \
-            LDFLAGS="$LDFLAGS -L$BUILD_ROOT/openssl_install/lib"
+            --enable-static
 
           make -j$(nproc)
           make install
@@ -151,7 +147,7 @@ jobs:
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
           export STRIP="$TOOLCHAIN/llvm-strip"
 
-          ./configure --static --prefix="$BUILD_ROOT/zlib_install" CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS"
+          ./configure --static --prefix="$BUILD_ROOT/zlib_install"
           make -j$(nproc)
           make install
 
@@ -164,6 +160,9 @@ jobs:
           cd tor
 
           ./autogen.sh
+          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/libevent_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include"
+          export LDFLAGS="-fPIC -pie -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/libevent_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib -ldl"
+
           ./configure \
             --host="$HOST_TRIPLE" \
             --prefix="$BUILD_ROOT/tor_install" \
@@ -174,9 +173,7 @@ jobs:
             --with-zlib-dir="$BUILD_ROOT/zlib_install" \
             --with-lzma-dir="$BUILD_ROOT/xz_install" \
             --disable-tool-name-check \
-            --disable-zstd \
-            CFLAGS="$CFLAGS -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/libevent_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include" \
-            LDFLAGS="$LDFLAGS -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/libevent_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib -ldl"
+            --disable-zstd
 
           make -j$(nproc)
           make install

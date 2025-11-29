@@ -62,8 +62,8 @@ jobs:
           echo "RANLIB=$TOOLCHAIN/llvm-ranlib" >> $GITHUB_ENV
           echo "STRIP=$TOOLCHAIN/llvm-strip" >> $GITHUB_ENV
 
-          echo "CFLAGS=-fPIC -O2 -ftls-model=initial-exec -falign-functions=$TLS_ALIGN" >> $GITHUB_ENV
-          echo "LDFLAGS=-fPIC -ldl" >> $GITHUB_ENV
+          echo "CFLAGS=-fPIC -O2 -fPIE -ftls-model=global-dynamic" >> $GITHUB_ENV
+          echo "LDFLAGS=-fPIC -pie -ldl" >> $GITHUB_ENV
 
       - name: Build OpenSSL
         env:
@@ -130,7 +130,7 @@ jobs:
             --prefix="$BUILD_ROOT/libevent_install" \
             --disable-shared \
             --enable-static \
-            CFLAGS="$CFLAGS -I$BUILD_ROOT/openssl_install/include" \
+            CFLAGS="$CFLAGS -I$BUILD_ROOT/openssl_install/include -D__ANDROID_API__=$API" \
             LDFLAGS="$LDFLAGS -L$BUILD_ROOT/openssl_install/lib"
 
           make -j$(nproc)
@@ -150,11 +150,8 @@ jobs:
           export AR="$TOOLCHAIN/llvm-ar"
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
           export STRIP="$TOOLCHAIN/llvm-strip"
-          export CFLAGS="$CFLAGS"
-          export LDFLAGS="$LDFLAGS"
 
-          ./configure --static --prefix="$BUILD_ROOT/zlib_install"
-
+          ./configure --static --prefix="$BUILD_ROOT/zlib_install" CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS"
           make -j$(nproc)
           make install
 

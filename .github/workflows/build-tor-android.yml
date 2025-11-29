@@ -24,12 +24,12 @@ jobs:
           ndk-version: r27c
           add-to-path: true
 
-      - name: Dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential autoconf automake libtool pkg-config cmake ninja-build gettext autopoint texinfo docbook2x git zlib1g-dev perl liblzma-dev wget
 
-      - name: Env
+      - name: Setup environment
         run: |
           export API=21
           case "${{ matrix.abi }}" in
@@ -44,9 +44,9 @@ jobs:
               TLS_ALIGN=32
               ;;
           esac
-
           TOOLCHAIN="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
           BUILD_ROOT="$GITHUB_WORKSPACE/build/${{ matrix.abi }}"
+          mkdir -p "$BUILD_ROOT"
 
           echo "API=$API" >> $GITHUB_ENV
           echo "HOST_TRIPLE=$HOST_TRIPLE" >> $GITHUB_ENV
@@ -67,21 +67,34 @@ jobs:
         run: |
           mkdir -p "$BUILD_ROOT/openssl_build"
           cd "$BUILD_ROOT/openssl_build"
-          git clone https://github.com/openssl/openssl.git --depth=1 --branch=openssl-3.2 openssl_src
+          git clone --depth=1 --branch=openssl-3.2 https://github.com/openssl/openssl.git openssl_src
           cd openssl_src
-
           export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
-          export CXX="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang++"
           export AR="$TOOLCHAIN/llvm-ar"
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
           export STRIP="$TOOLCHAIN/llvm-strip"
-
-          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic -pthread -Wl,-z,max-page-size=16384"
+          export CFLAGS="-fPIC -O2 -ftls-model=initial-exec -pthread -Wl,-z,max-page-size=16384"
           export LDFLAGS="-fPIC -pie -pthread -Wl,-z,max-page-size=16384 -ldl"
-
           ./Configure "$OPENSSL_TARGET" no-shared no-tests -D__ANDROID_API__=$API --prefix="$BUILD_ROOT/openssl_install"
           make -j$(nproc)
           make install_sw
+
+      - name: Build zlib
+        env:
+          PATH: ${{ env.TOOLCHAIN }}:/usr/bin:/bin
+        run: |
+          mkdir -p "$BUILD_ROOT/zlib_build"
+          cd "$BUILD_ROOT/zlib_build"
+          git clone --depth=1 --branch=v1.3.1 https://github.com/madler/zlib.git zlib_src
+          cd zlib_src
+          export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
+          export AR="$TOOLCHAIN/llvm-ar"
+          export RANLIB="$TOOLCHAIN/llvm-ranlib"
+          export CFLAGS="-fPIC -O2 -ftls-model=initial-exec -Wl,-z,max-page-size=16384"
+          export LDFLAGS="-fPIC -pie -Wl,-z,max-page-size=16384"
+          ./configure --static --prefix="$BUILD_ROOT/zlib_install"
+          make -j$(nproc)
+          make install
 
       - name: Build xz
         env:
@@ -92,73 +105,27 @@ jobs:
           wget https://tukaani.org/xz/xz-5.4.5.tar.gz
           tar -xzf xz-5.4.5.tar.gz
           cd xz-5.4.5
-
           export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
-          export CXX="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang++"
           export AR="$TOOLCHAIN/llvm-ar"
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
-          export STRIP="$TOOLCHAIN/llvm-strip"
-
-          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic -Wl,-z,max-page-size=16384"
+          export CFLAGS="-fPIC -O2 -ftls-model=initial-exec -Wl,-z,max-page-size=16384"
           export LDFLAGS="-fPIC -pie -Wl,-z,max-page-size=16384"
-
-          ./configure \
-            --host="$HOST_TRIPLE" \
-            --prefix="$BUILD_ROOT/xz_install" \
-            --disable-shared \
-            --enable-static \
-            --disable-xz \
-            --disable-xzdec \
-            --disable-lzmadec \
-            --disable-lzmainfo \
-            --disable-scripts \
-            --disable-nls
-
+          ./configure --host="$HOST_TRIPLE" --prefix="$BUILD_ROOT/xz_install" --disable-shared --enable-static --disable-xz --disable-xzdec --disable-lzmadec --disable-lzmainfo --disable-scripts --disable-nls
           make -j$(nproc)
           make install
 
       - name: Build libevent
         run: |
           cd "$BUILD_ROOT"
-          git clone https://github.com/libevent/libevent.git --depth=1 --branch=release-2.1.12-stable libevent
+          git clone --depth=1 --branch=release-2.1.12-stable https://github.com/libevent/libevent.git libevent
           cd libevent
-
           ./autogen.sh
-
-          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic -pthread -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include -Wl,-z,max-page-size=16384"
+          export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
+          export AR="$TOOLCHAIN/llvm-ar"
+          export RANLIB="$TOOLCHAIN/llvm-ranlib"
+          export CFLAGS="-fPIC -O2 -ftls-model=initial-exec -pthread -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include -Wl,-z,max-page-size=16384"
           export LDFLAGS="-fPIC -pie -pthread -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib -ldl"
-          export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
-          export AR="$TOOLCHAIN/llvm-ar"
-          export RANLIB="$TOOLCHAIN/llvm-ranlib"
-
-          ./configure \
-            --host="$HOST_TRIPLE" \
-            --prefix="$BUILD_ROOT/libevent_install" \
-            --disable-shared \
-            --enable-static
-
-          make -j$(nproc)
-          make install
-
-      - name: Build zlib
-        env:
-          PATH: ${{ env.TOOLCHAIN }}:/usr/bin:/bin
-        run: |
-          mkdir -p "$BUILD_ROOT/zlib_build"
-          cd "$BUILD_ROOT/zlib_build"
-          git clone https://github.com/madler/zlib.git --depth=1 --branch=v1.3.1 zlib_src
-          cd zlib_src
-
-          export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
-          export CXX="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang++"
-          export AR="$TOOLCHAIN/llvm-ar"
-          export RANLIB="$TOOLCHAIN/llvm-ranlib"
-          export STRIP="$TOOLCHAIN/llvm-strip"
-
-          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic -Wl,-z,max-page-size=16384"
-          export LDFLAGS="-fPIC -pie -Wl,-z,max-page-size=16384"
-
-          ./configure --static --prefix="$BUILD_ROOT/zlib_install"
+          ./configure --host="$HOST_TRIPLE" --prefix="$BUILD_ROOT/libevent_install" --disable-shared --enable-static
           make -j$(nproc)
           make install
 
@@ -167,31 +134,17 @@ jobs:
           PATH: ${{ env.TOOLCHAIN }}:/usr/bin:/bin
         run: |
           cd "$BUILD_ROOT"
-          git clone https://git.torproject.org/tor.git --depth=1 --branch=release-0.4.8 tor
+          git clone --depth=1 --branch=release-0.4.8 https://git.torproject.org/tor.git tor
           cd tor
-
           ./autogen.sh
-
-          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic -pthread -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/libevent_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include -Wl,-z,max-page-size=16384"
-          export LDFLAGS="-fPIC -pie -pthread -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/libevent_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib -ldl"
           export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
           export CXX="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang++"
           export AR="$TOOLCHAIN/llvm-ar"
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
           export STRIP="$TOOLCHAIN/llvm-strip"
-
-          ./configure \
-            --host="$HOST_TRIPLE" \
-            --prefix="$BUILD_ROOT/tor_install" \
-            --disable-asciidoc \
-            --enable-static-tor \
-            --with-openssl-dir="$BUILD_ROOT/openssl_install" \
-            --with-libevent-dir="$BUILD_ROOT/libevent_install" \
-            --with-zlib-dir="$BUILD_ROOT/zlib_install" \
-            --with-lzma-dir="$BUILD_ROOT/xz_install" \
-            --disable-tool-name-check \
-            --disable-zstd
-
+          export CFLAGS="-fPIC -O2 -ftls-model=initial-exec -pthread -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/libevent_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include -Wl,-z,max-page-size=16384"
+          export LDFLAGS="-fPIC -pie -pthread -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/libevent_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib -ldl"
+          ./configure --host="$HOST_TRIPLE" --prefix="$BUILD_ROOT/tor_install" --disable-asciidoc --enable-static-tor --with-openssl-dir="$BUILD_ROOT/openssl_install" --with-libevent-dir="$BUILD_ROOT/libevent_install" --with-zlib-dir="$BUILD_ROOT/zlib_install" --with-lzma-dir="$BUILD_ROOT/xz_install" --disable-tool-name-check --disable-zstd
           make -j$(nproc)
           make install
 
@@ -211,5 +164,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: tor-${{ matrix.abi }}
-          path: $BUILD_ROOT/tor_install/bin/tor
+          path: ${{ env.BUILD_ROOT }}/tor_install/bin/tor
 

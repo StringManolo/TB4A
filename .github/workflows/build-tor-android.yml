@@ -17,17 +17,23 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-    - name: Checkout Tor source
-      uses: actions/checkout@v4
-      with:
-        repository: torproject/tor
-        ref: "tor-${{ env.TOR_VERSION }}"
+    - name: Check Tor tag exists
+      run: |
+        echo "Checking if tag tor-${{ env.TOR_VERSION }} exists..."
+        git ls-remote --tags https://git.torproject.org/tor.git | grep "tor-${{ env.TOR_VERSION }}" || echo "Tag not found, trying alternative..."
+
+    - name: Download Tor source
+      run: |
+        # Descargar el source tarball directamente que es más confiable
+        wget https://dist.torproject.org/tor-${{ env.TOR_VERSION }}.tar.gz
+        tar -xzf tor-${{ env.TOR_VERSION }}.tar.gz
+        mv tor-${{ env.TOR_VERSION }} tor-src
+        ls -la tor-src/
 
     - name: Setup Android NDK
       uses: nttld/setup-ndk@v1
       with:
         ndk-version: ${{ env.NDK_VERSION }}
-      id: ndk
 
     - name: Install build dependencies
       run: |
@@ -44,6 +50,7 @@ jobs:
 
     - name: Configure and build for ${{ matrix.arch }}
       run: |
+        cd tor-src
         chmod +x ./autogen.sh
         ./autogen.sh
 
@@ -86,13 +93,14 @@ jobs:
     - name: Verify binary
       run: |
         echo "Verifying Tor binary..."
+        cd tor-src
         file src/app/tor
         ./src/app/tor --version || echo "Version check failed but continuing"
 
     - name: Prepare artifacts
       run: |
         mkdir -p artifacts/${{ matrix.arch }}
-        cp src/app/tor artifacts/${{ matrix.arch }}/
+        cp tor-src/src/app/tor artifacts/${{ matrix.arch }}/
         cd artifacts/${{ matrix.arch }}
         sha256sum tor > tor.sha256
         echo "Tor ${{ env.TOR_VERSION }} for ${{ matrix.arch }}" > README.txt

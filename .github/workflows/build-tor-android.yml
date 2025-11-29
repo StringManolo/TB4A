@@ -35,7 +35,6 @@ jobs:
       - name: Env
         run: |
           export API=21
-
           case "${{ matrix.abi }}" in
             arm64-v8a)
               HOST_TRIPLE="aarch64-linux-android"
@@ -46,27 +45,18 @@ jobs:
               OPENSSL_TARGET="android-arm"
               ;;
           esac
-
           TOOLCHAIN="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
           BUILD_ROOT="$GITHUB_WORKSPACE/build/${{ matrix.abi }}"
-          INSTALL_ROOT="$BUILD_ROOT/install"
-
-          mkdir -p "$INSTALL_ROOT"
-
           echo "API=$API" >> $GITHUB_ENV
           echo "HOST_TRIPLE=$HOST_TRIPLE" >> $GITHUB_ENV
           echo "OPENSSL_TARGET=$OPENSSL_TARGET" >> $GITHUB_ENV
           echo "TOOLCHAIN=$TOOLCHAIN" >> $GITHUB_ENV
           echo "BUILD_ROOT=$BUILD_ROOT" >> $GITHUB_ENV
-          echo "INSTALL_ROOT=$INSTALL_ROOT" >> $GITHUB_ENV
-
           echo "CC=$TOOLCHAIN/${HOST_TRIPLE}${API}-clang" >> $GITHUB_ENV
           echo "CXX=$TOOLCHAIN/${HOST_TRIPLE}${API}-clang++" >> $GITHUB_ENV
           echo "AR=$TOOLCHAIN/llvm-ar" >> $GITHUB_ENV
           echo "RANLIB=$TOOLCHAIN/llvm-ranlib" >> $GITHUB_ENV
           echo "STRIP=$TOOLCHAIN/llvm-strip" >> $GITHUB_ENV
-          echo "NM=$TOOLCHAIN/llvm-nm" >> $GITHUB_ENV
-
           echo "CFLAGS=-fPIC -O2" >> $GITHUB_ENV
           echo "LDFLAGS=-fPIC" >> $GITHUB_ENV
 
@@ -74,12 +64,14 @@ jobs:
       - name: Build OpenSSL
         env:
           PATH: ${{ env.TOOLCHAIN }}:/usr/bin:/bin
+          CC: clang
+          CXX: clang++
         run: |
+          mkdir -p "$BUILD_ROOT"
           cd "$BUILD_ROOT"
           git clone https://github.com/openssl/openssl.git --depth=1 --branch=openssl-3.2 openssl
           cd openssl
-
-          ./Configure "$OPENSSL_TARGET" no-shared no-tests --prefix="$INSTALL_ROOT/openssl"
+          ./Configure "$OPENSSL_TARGET" no-shared no-tests no-ssl3 no-comp no-examples --prefix="$BUILD_ROOT/openssl"
           make -j$(nproc)
           make install_sw
 
@@ -89,16 +81,15 @@ jobs:
           cd "$BUILD_ROOT"
           git clone https://github.com/libevent/libevent.git --depth=1 --branch=release-2.1.12-stable libevent
           cd libevent
-
           ./autogen.sh
           ./configure \
             --host="$HOST_TRIPLE" \
-            --prefix="$INSTALL_ROOT/libevent" \
+            --prefix="$BUILD_ROOT/libevent" \
             --disable-shared \
             --enable-static \
-            CFLAGS="$CFLAGS -I$INSTALL_ROOT/openssl/include" \
-            LDFLAGS="$LDFLAGS -L$INSTALL_ROOT/openssl/lib"
-
+            --disable-samples \
+            CFLAGS="$CFLAGS -I$BUILD_ROOT/openssl/include" \
+            LDFLAGS="$LDFLAGS -L$BUILD_ROOT/openssl/lib"
           make -j$(nproc)
           make install
 
@@ -108,28 +99,16 @@ jobs:
           cd "$BUILD_ROOT"
           git clone https://git.torproject.org/tor.git --depth=1 --branch=release-0.4.8 tor
           cd tor
-
-          export PATH="$TOOLCHAIN:$PATH"
-          export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
-          export CXX="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang++"
-          export AR="$TOOLCHAIN/llvm-ar"
-          export RANLIB="$TOOLCHAIN/llvm-ranlib"
-          export STRIP="$TOOLCHAIN/llvm-strip"
-          export NM="$TOOLCHAIN/llvm-nm"
-          export TOR_CROSS_COMPILE_PREFIX="${HOST_TRIPLE}-"
-
           ./autogen.sh
           ./configure \
             --host="$HOST_TRIPLE" \
-            --prefix="$INSTALL_ROOT/tor" \
+            --prefix="$BUILD_ROOT/tor" \
             --disable-asciidoc \
             --enable-static-tor \
-            --disable-tool-name-check \
-            --with-openssl-dir="$INSTALL_ROOT/openssl" \
-            --with-libevent-dir="$INSTALL_ROOT/libevent" \
-            CFLAGS="$CFLAGS -I$INSTALL_ROOT/openssl/include -I$INSTALL_ROOT/libevent/include" \
-            LDFLAGS="$LDFLAGS -L$INSTALL_ROOT/openssl/lib -L$INSTALL_ROOT/libevent/lib"
-
+            --with-openssl-dir="$BUILD_ROOT/openssl" \
+            --with-libevent-dir="$BUILD_ROOT/libevent" \
+            CFLAGS="$CFLAGS -I$BUILD_ROOT/openssl/include -I$BUILD_ROOT/libevent/include" \
+            LDFLAGS="$LDFLAGS -L$BUILD_ROOT/openssl/lib -L$BUILD_ROOT/libevent/lib"
           make -j$(nproc)
           make install
 
@@ -138,5 +117,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: tor-${{ matrix.abi }}
-          path: ${{ env.INSTALL_ROOT }}/tor
+          path: ${{ env.BUILD_ROOT }}/tor
 

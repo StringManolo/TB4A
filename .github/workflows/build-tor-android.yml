@@ -7,6 +7,8 @@ on:
 
 env:
   TOR_VERSION: "0.4.8.21"
+  OPENSSL_VERSION: "1.1.1w"
+  LIBEVENT_VERSION: "2.1.12-stable"
 
 jobs:
   build:
@@ -14,7 +16,7 @@ jobs:
       matrix:
         arch: [arm64-v8a, armeabi-v7a]
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
     - name: Check available NDK versions
@@ -24,16 +26,24 @@ jobs:
         echo "🔍 Checking ANDROID_NDK_HOME: $ANDROID_NDK_HOME"
         echo "🔍 Checking ANDROID_NDK_LATEST_HOME: $ANDROID_NDK_LATEST_HOME"
 
-    - name: Download Tor source
+    - name: Download sources
       run: |
         echo "📥 Downloading Tor source..."
         wget -q https://dist.torproject.org/tor-${{ env.TOR_VERSION }}.tar.gz
         tar -xzf tor-${{ env.TOR_VERSION }}.tar.gz
         mv tor-${{ env.TOR_VERSION }} tor-src
-        echo "📁 Source files in tor-src/:"
-        ls -la tor-src/
+        
+        echo "📥 Downloading OpenSSL source..."
+        wget -q https://www.openssl.org/source/openssl-${{ env.OPENSSL_VERSION }}.tar.gz
+        tar -xzf openssl-${{ env.OPENSSL_VERSION }}.tar.gz
+        mv openssl-${{ env.OPENSSL_VERSION }} openssl-src
+        
+        echo "📥 Downloading libevent source..."
+        wget -q https://github.com/libevent/libevent/releases/download/release-${{ env.LIBEVENT_VERSION }}/libevent-${{ env.LIBEVENT_VERSION }}.tar.gz
+        tar -xzf libevent-${{ env.LIBEVENT_VERSION }}.tar.gz
+        mv libevent-${{ env.LIBEVENT_VERSION }} libevent-src
 
-    - name: Install build dependencies
+    - name: Install host dependencies
       run: |
         echo "📦 Installing build dependencies..."
         sudo apt-get update -qq
@@ -45,71 +55,104 @@ jobs:
           pkg-config \
           make \
           clang \
-          file
+          file \
+          perl
         echo "✅ Dependencies installed"
 
-    - name: Configure and build for ${{ matrix.arch }}
+    - name: Setup environment for ${{ matrix.arch }}
+      id: setup_env
       run: |
-        cd tor-src
-        
-        echo "🔧 Checking build scripts..."
-        echo "📁 Current directory: $(pwd)"
-        
-        # El tarball oficial ya incluye configure, no necesita autogen.sh
-        if [ -f "./configure" ]; then
-          echo "✅ Configure script found, making executable..."
-          chmod +x ./configure
-        else
-          echo "❌ Configure script not found!"
-          exit 1
-        fi
-
         case "${{ matrix.arch }}" in
           arm64-v8a)
-            export HOST="aarch64-linux-android"
-            export API_LEVEL="21"
+            echo "HOST=aarch64-linux-android" >> $GITHUB_ENV
+            echo "API_LEVEL=21" >> $GITHUB_ENV
             ;;
           armeabi-v7a)
-            export HOST="armv7a-linux-androideabi"
-            export API_LEVEL="21"  # Cambiado de 16 a 21 (mínimo disponible en este NDK)
+            echo "HOST=armv7a-linux-androideabi" >> $GITHUB_ENV
+            echo "API_LEVEL=21" >> $GITHUB_ENV
             ;;
         esac
 
-        # Usar NDK preinstalado de GitHub Actions
         export ANDROID_NDK_HOME="${ANDROID_NDK_ROOT:-$ANDROID_NDK_LATEST_HOME}"
         if [ -z "$ANDROID_NDK_HOME" ]; then
-          # Fallback: buscar NDK en la ubicación estándar
           export ANDROID_NDK_HOME="/usr/local/lib/android/sdk/ndk/$(ls /usr/local/lib/android/sdk/ndk/ | head -1)"
         fi
+        echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> $GITHUB_ENV
         
-        export TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
-        export CC="$TOOLCHAIN/bin/${HOST}${API_LEVEL}-clang"
-        export CXX="$TOOLCHAIN/bin/${HOST}${API_LEVEL}-clang++"
-        export AR="$TOOLCHAIN/bin/llvm-ar"
-        export RANLIB="$TOOLCHAIN/bin/llvm-ranlib"
-        export STRIP="$TOOLCHAIN/bin/llvm-strip"
-        export PATH="$TOOLCHAIN/bin:$PATH"
+        echo "TOOLCHAIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64" >> $GITHUB_ENV
+        echo "CC=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/${HOST}${API_LEVEL}-clang" >> $GITHUB_ENV
+        echo "CXX=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/${HOST}${API_LEVEL}-clang++" >> $GITHUB_ENV
+        echo "AR=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar" >> $GITHUB_ENV
+        echo "RANLIB=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib" >> $GITHUB_ENV
+        echo "STRIP=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" >> $GITHUB_ENV
+        
+        echo "PATH=$TOOLCHAIN/bin:$PATH" >> $GITHUB_ENV
+        echo "INSTALL_DIR=$(pwd)/install/${{ matrix.arch }}" >> $GITHUB_ENV
+        
+        echo "CPPFLAGS=-I${{ env.INSTALL_DIR }}/include" >> $GITHUB_ENV
+        echo "LDFLAGS=-L${{ env.INSTALL_DIR }}/lib" >> $GITHUB_ENV
 
-        echo "🏗️ Building Tor for ${{ matrix.arch }}..."
-        echo "📋 Build details:"
-        echo "  - Host: $HOST"
-        echo "  - API Level: $API_LEVEL"
-        echo "  - CC: $CC"
-        echo "  - NDK: $ANDROID_NDK_HOME"
-        echo "  - Toolchain: $TOOLCHAIN"
+    - name: Configure and build OpenSSL for ${{ matrix.arch }}
+      run: |
+        echo "🏗️ Building OpenSSL for ${{ matrix.arch }}..."
+        
+        cd openssl-src
+        
+        case "${{ matrix.arch }}" in
+          arm64-v8a)
+            TARGET_CONFIG="android-arm64"
+            ;;
+          armeabi-v7a)
+            TARGET_CONFIG="android-armeabi"
+            ;;
+        esac
 
-        # Verificar que el compilador existe
-        if [ ! -f "$CC" ]; then
-          echo "❌ Compiler not found: $CC"
-          echo "📁 Toolchain contents:"
-          ls -la "$TOOLCHAIN/bin/" | grep "$HOST" || echo "No compilers found for $HOST"
-          exit 1
-        fi
+        ./Configure $TARGET_CONFIG \
+          no-shared \
+          no-weak-ssl-ciphers \
+          no-asm \
+          --prefix=${{ env.INSTALL_DIR }} \
+          -D__ANDROID_API__=${{ env.API_LEVEL }} \
+          -fPIC
+          
+        echo "🔨 Compiling and installing OpenSSL..."
+        make -j2
+        make install_sw
+        
+        echo "✅ OpenSSL compiled and installed"
 
-        echo "⚙️ Configuring Tor..."
+    - name: Configure and build libevent for ${{ matrix.arch }}
+      run: |
+        echo "🏗️ Building libevent for ${{ matrix.arch }}..."
+
+        cd libevent-src
+        
+        chmod +x ./configure
         ./configure \
-          --host="$HOST" \
-          --enable-static-libevent \
+          --host=${{ env.HOST }} \
+          --prefix=${{ env.INSTALL_DIR }} \
+          --disable-shared \
+          --enable-static \
+          --disable-samples \
+          --enable-openssl \
+          --with-openssl-dir=${{ env.INSTALL_DIR }}
+          
+        echo "🔨 Compiling and installing libevent..."
+        make -j2
+        make install
+        
+        echo "✅ libevent compiled and installed"
+
+    - name: Configure and build Tor for ${{ matrix.arch }}
+      run: |
+        echo "🏗️ Building Tor for ${{ matrix.arch }}..."
+
+        cd tor-src
+        
+        chmod +x ./configure
+        ./configure \
+          --host=${{ env.HOST }} \
+          --enable-static \
           --disable-asciidoc \
           --disable-manpage \
           --disable-html-manual \
@@ -119,97 +162,22 @@ jobs:
           --enable-zstd=no \
           --enable-seccomp=no \
           --enable-libscrypt=no \
-          --enable-tool-name-check=no
-        
+          --enable-tool-name-check=no \
+          --with-libevent-dir=${{ env.INSTALL_DIR }} \
+          --with-openssl-dir=${{ env.INSTALL_DIR }} \
+          --prefix=${{ env.INSTALL_DIR }}
+          
         echo "🔨 Compiling Tor..."
         make -j2
         
-        echo "✅ Build completed for ${{ matrix.arch }}"
+        echo "✅ Tor built successfully for ${{ matrix.arch }}"
+        
+        echo "🔍 Checking resulting binary..."
+        ls -la ${{ env.INSTALL_DIR }}/bin/tor
+        ${{ env.STRIP }} ${{ env.INSTALL_DIR }}/bin/tor
 
-    - name: Verify binary
-      run: |
-        cd tor-src
-        echo "🔍 Verifying Tor binary..."
-        if [ -f src/app/tor ]; then
-          echo "✅ Binary exists"
-          file src/app/tor
-          # Intentar obtener versión
-          ./src/app/tor --version || echo "⚠️ Version check failed but binary exists"
-        else
-          echo "❌ Binary not found!"
-          echo "📁 Listing build directory:"
-          find . -name "tor" -type f
-          exit 1
-        fi
-
-    - name: Prepare artifacts
-      run: |
-        echo "📦 Preparing artifacts for ${{ matrix.arch }}..."
-        mkdir -p artifacts/${{ matrix.arch }}
-        cp tor-src/src/app/tor artifacts/${{ matrix.arch }}/
-        cd artifacts/${{ matrix.arch }}
-        sha256sum tor > tor.sha256
-        echo "Tor ${{ env.TOR_VERSION }} for ${{ matrix.arch }}" > README.txt
-        echo "✅ Artifacts prepared"
-
-    - name: Upload build artifacts
+    - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: tor-${{ matrix.arch }}-${{ env.TOR_VERSION }}
-        path: artifacts/${{ matrix.arch }}/
-
-  create-release:
-    needs: build
-    runs-on: ubuntu-24.04
-    if: startsWith(github.ref, 'refs/tags/tor-')
-    
-    steps:
-    - name: Download all artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: downloaded-artifacts
-
-    - name: List downloaded files
-      run: |
-        echo "📁 Downloaded artifacts:"
-        find downloaded-artifacts -type f
-
-    - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ github.ref_name }}
-        release_name: Tor ${{ env.TOR_VERSION }} for Android
-        body: |
-          Tor ${{ env.TOR_VERSION }} compiled for Android
-          
-          Architectures included:
-          - arm64-v8a (modern devices)
-          - armeabi-v7a (legacy devices)
-          
-          Built with preinstalled Android NDK on GitHub Actions
-          Minimum API Level: 21
-        draft: false
-        prerelease: false
-
-    - name: Upload ARM64 Binary
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: downloaded-artifacts/tor-arm64-v8a-${{ env.TOR_VERSION }}/tor
-        asset_name: tor-android-arm64-v8a
-        asset_content_type: application/octet-stream
-
-    - name: Upload ARMv7 Binary
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: downloaded-artifacts/tor-armeabi-v7a-${{ env.TOR_VERSION }}/tor
-        asset_name: tor-android-armeabi-v7a
-        asset_content_type: application/octet-stream
+        name: tor-android-${{ matrix.arch }}-${{ env.TOR_VERSION }}
+        path: install/${{ matrix.arch }}/bin/tor

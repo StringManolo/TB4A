@@ -1,3 +1,4 @@
+
 name: Build Tor for Android (ARM only)
 
 on:
@@ -13,7 +14,7 @@ jobs:
     strategy:
       matrix:
         arch: [arm64-v8a, armeabi-v7a]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     steps:
@@ -24,18 +25,13 @@ jobs:
         echo "🔍 Checking ANDROID_NDK_HOME: $ANDROID_NDK_HOME"
         echo "🔍 Checking ANDROID_NDK_LATEST_HOME: $ANDROID_NDK_LATEST_HOME"
 
-    - name: Check Tor tag exists
-      run: |
-        echo "✅ Checking if tag tor-${{ env.TOR_VERSION }} exists..."
-        git ls-remote --tags https://git.torproject.org/tor.git | grep "tor-${{ env.TOR_VERSION }}" || echo "⚠️ Tag not found, but continuing with tarball..."
-
     - name: Download Tor source
       run: |
         echo "📥 Downloading Tor source..."
         wget -q https://dist.torproject.org/tor-${{ env.TOR_VERSION }}.tar.gz
         tar -xzf tor-${{ env.TOR_VERSION }}.tar.gz
         mv tor-${{ env.TOR_VERSION }} tor-src
-        echo "📁 Source files:"
+        echo "📁 Source files in tor-src/:"
         ls -la tor-src/
 
     - name: Install build dependencies
@@ -56,10 +52,20 @@ jobs:
     - name: Configure and build for ${{ matrix.arch }}
       run: |
         cd tor-src
-        
-        echo "🔧 Running autogen..."
-        chmod +x ./autogen.sh
-        ./autogen.sh || echo "⚠️ autogen.sh might have warnings but continuing..."
+
+        echo "🔧 Checking build scripts..."
+        echo "📁 Current directory: $(pwd)"
+        echo "📁 Files in current directory:"
+        ls -la
+
+        # El tarball oficial ya incluye configure, no necesita autogen.sh
+        if [ -f "./configure" ]; then
+          echo "✅ Configure script found, making executable..."
+          chmod +x ./configure
+        else
+          echo "❌ Configure script not found!"
+          exit 1
+        fi
 
         case "${{ matrix.arch }}" in
           arm64-v8a)
@@ -78,7 +84,7 @@ jobs:
           # Fallback: buscar NDK en la ubicación estándar
           export ANDROID_NDK_HOME="/usr/local/lib/android/sdk/ndk/$(ls /usr/local/lib/android/sdk/ndk/ | head -1)"
         fi
-        
+
         export TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
         export CC="$TOOLCHAIN/bin/${HOST}${API_LEVEL}-clang"
         export CXX="$TOOLCHAIN/bin/${HOST}${API_LEVEL}-clang++"
@@ -117,10 +123,10 @@ jobs:
           --enable-seccomp=no \
           --enable-libscrypt=no \
           --enable-tool-name-check=no
-        
+
         echo "🔨 Compiling Tor..."
         make -j2
-        
+
         echo "✅ Build completed for ${{ matrix.arch }}"
 
     - name: Verify binary
@@ -157,9 +163,9 @@ jobs:
 
   create-release:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: startsWith(github.ref, 'refs/tags/tor-')
-    
+
     steps:
     - name: Download all artifacts
       uses: actions/download-artifact@v4
@@ -181,11 +187,11 @@ jobs:
         release_name: Tor ${{ env.TOR_VERSION }} for Android
         body: |
           Tor ${{ env.TOR_VERSION }} compiled for Android
-          
+
           Architectures included:
           - arm64-v8a (modern devices)
           - armeabi-v7a (legacy devices)
-          
+
           Built with preinstalled Android NDK on GitHub Actions
         draft: false
         prerelease: false

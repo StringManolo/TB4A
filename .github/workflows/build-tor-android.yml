@@ -65,10 +65,12 @@ jobs:
         case "${{ matrix.arch }}" in
           arm64-v8a)
             echo "HOST=aarch64-linux-android" >> $GITHUB_ENV
+            echo "TARGET_TRIPLET=aarch64-linux-android" >> $GITHUB_ENV
             echo "API_LEVEL=21" >> $GITHUB_ENV
             ;;
           armeabi-v7a)
             echo "HOST=armv7a-linux-androideabi" >> $GITHUB_ENV
+            echo "TARGET_TRIPLET=armv7a-linux-androideabi" >> $GITHUB_ENV
             echo "API_LEVEL=21" >> $GITHUB_ENV
             ;;
         esac
@@ -79,18 +81,27 @@ jobs:
         fi
         echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> $GITHUB_ENV
         
-        echo "TOOLCHAIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64" >> $GITHUB_ENV
-        echo "CC=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/${HOST}${API_LEVEL}-clang" >> $GITHUB_ENV
-        echo "CXX=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/${HOST}${API_LEVEL}-clang++" >> $GITHUB_ENV
-        echo "AR=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar" >> $GITHUB_ENV
-        echo "RANLIB=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib" >> $GITHUB_ENV
-        echo "STRIP=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" >> $GITHUB_ENV
+        TOOLCHAIN_LLVM="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
+        echo "TOOLCHAIN=$TOOLCHAIN_LLVM" >> $GITHUB_ENV
+
+        SYSROOT="$TOOLCHAIN_LLVM/sysroot"
         
-        echo "PATH=$TOOLCHAIN/bin:$PATH" >> $GITHUB_ENV
+        echo "CC=$TOOLCHAIN_LLVM/bin/clang" >> $GITHUB_ENV
+        echo "CXX=$TOOLCHAIN_LLVM/bin/clang++" >> $GITHUB_ENV
+        
+        echo "TARGET_FLAGS=-target ${{ env.TARGET_TRIPLET }}${{ env.API_LEVEL }} --sysroot=$SYSROOT" >> $GITHUB_ENV
+        
+        echo "AR=$TOOLCHAIN_LLVM/bin/llvm-ar" >> $GITHUB_ENV
+        echo "RANLIB=$TOOLCHAIN_LLVM/bin/llvm-ranlib" >> $GITHUB_ENV
+        echo "STRIP=$TOOLCHAIN_LLVM/bin/llvm-strip" >> $GITHUB_ENV
+        
+        echo "PATH=$TOOLCHAIN_LLVM/bin:$PATH" >> $GITHUB_ENV
         echo "INSTALL_DIR=$(pwd)/install/${{ matrix.arch }}" >> $GITHUB_ENV
         
-        echo "CPPFLAGS=-I${{ env.INSTALL_DIR }}/include" >> $GITHUB_ENV
-        echo "LDFLAGS=-L${{ env.INSTALL_DIR }}/lib" >> $GITHUB_ENV
+        echo "CPPFLAGS=-I${{ env.INSTALL_DIR }}/include ${{ env.TARGET_FLAGS }}" >> $GITHUB_ENV
+        echo "LDFLAGS=-L${{ env.INSTALL_DIR }}/lib ${{ env.TARGET_FLAGS }}" >> $GITHUB_ENV
+        echo "CFLAGS=${{ env.TARGET_FLAGS }}" >> $GITHUB_ENV
+        echo "CXXFLAGS=${{ env.TARGET_FLAGS }}" >> $GITHUB_ENV
 
     - name: Configure and build OpenSSL for ${{ matrix.arch }}
       run: |
@@ -106,6 +117,10 @@ jobs:
             TARGET_CONFIG="android-armeabi"
             ;;
         esac
+
+        export CC="${{ env.TOOLCHAIN }}/bin/${{ env.TARGET_TRIPLET }}${{ env.API_LEVEL }}-clang"
+        export CXX="${{ env.TOOLCHAIN }}/bin/${{ env.TARGET_TRIPLET }}${{ env.API_LEVEL }}-clang++"
+        export AR="${{ env.AR }}"
 
         ./Configure $TARGET_CONFIG \
           no-shared \

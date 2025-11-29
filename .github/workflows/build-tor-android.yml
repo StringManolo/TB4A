@@ -3,18 +3,18 @@ name: Build Tor for Android (ARM only)
 on:
   push:
     tags: ['tor-*']
-  workflow_dispatch:  # Ejecución manual desde la UI de GitHub
+  workflow_dispatch:
 
 env:
-  TOR_VERSION: "0.4.8.10"  # Última versión estable de Tor (verificar en torproject.org)
-  NDK_VERSION: '26.1.10909125'  # Última versión estable de Android NDK
+  TOR_VERSION: "0.4.8.21"  # Última versión estable de Tor
+  NDK_VERSION: "r27d"       # Última versión estable del NDK
 
 jobs:
   build:
     strategy:
       matrix:
         arch: [arm64-v8a, armeabi-v7a]
-    runs-on: ubuntu-24.04  # Última versión de Ubuntu LTS
+    runs-on: ubuntu-24.04
     
     steps:
     - name: Checkout Tor source
@@ -38,11 +38,13 @@ jobs:
           gettext \
           pkg-config \
           make \
-          clang
-        # Verificar versiones instaladas
+          clang \
+          file
+        echo "=== Versiones instaladas ==="
         autoconf --version | head -1
         automake --version | head -1
         libtool --version | head -1
+        clang --version | head -1
         
     - name: Configure and build for ${{ matrix.arch }}
       run: |
@@ -69,8 +71,14 @@ jobs:
         export STRIP="$TOOLCHAIN/bin/llvm-strip"
         export PATH="$TOOLCHAIN/bin:$PATH"
         
-        echo "Compilando Tor ${{ env.TOR_VERSION }} para ${{ matrix.arch }}..."
+        echo "=== Configuración de compilación ==="
+        echo "Arquitectura: ${{ matrix.arch }}"
+        echo "Tor version: ${{ env.TOR_VERSION }}"
+        echo "NDK version: ${{ env.NDK_VERSION }}"
+        echo "Host: $HOST"
+        echo "API Level: $API_LEVEL"
         echo "Compiler: $CC"
+        echo "Toolchain: $TOOLCHAIN"
         
         ./configure \
           --host="$HOST" \
@@ -81,16 +89,18 @@ jobs:
           --disable-system-torrc \
           --disable-unittests
         
+        echo "=== Iniciando compilación ==="
         make -j$(nproc)
+        echo "✅ Build completado exitosamente"
         
     - name: Verify binary
       run: |
         echo "=== Verificando binario ==="
         file src/app/tor
         echo "=== Información ELF ==="
-        $TOOLCHAIN/bin/llvm-readelf -h src/app/tor || true
+        $TOOLCHAIN/bin/llvm-readelf -h src/app/tor || echo "⚠️  No se pudo leer ELF header, pero continuamos..."
         echo "=== Versión de Tor ==="
-        ./src/app/tor --version || true
+        ./src/app/tor --version || echo "⚠️  No se pudo verificar versión, pero continuamos..."
         
     - name: Prepare artifacts
       run: |
@@ -103,9 +113,16 @@ jobs:
         sha256sum tor > tor.sha256
         sha256sum tor-${{ env.TOR_VERSION }}-${{ matrix.arch }} > tor-${{ env.TOR_VERSION }}-${{ matrix.arch }}.sha256
         
-        echo "Tor ${{ env.TOR_VERSION }} for ${{ matrix.arch }}" > README.txt
-        echo "Built on: $(date -u)" >> README.txt
-        echo "GitHub Run ID: $GITHUB_RUN_ID" >> README.txt
+        cat > README.txt << EOF
+Tor ${{ env.TOR_VERSION }} for ${{ matrix.arch }}
+        
+Built on: $(date -u)
+GitHub Run ID: $GITHUB_RUN_ID
+NDK Version: ${{ env.NDK_VERSION }}
+Architecture: ${{ matrix.arch }}
+        
+Usage: Copy to app/src/main/jniLibs/${{ matrix.arch }}/tor
+EOF
         
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
@@ -126,23 +143,29 @@ jobs:
         body: |
           # Tor ${{ env.TOR_VERSION }} for Android
           
-          ## Arquitecturas soportadas:
-          - **arm64-v8a**: Dispositivos modernos (2015+)
-          - **armeabi-v7a**: Dispositivos legacy (2012-2015)
+          ## Supported Architectures:
+          - **arm64-v8a**: Modern devices (2015+)
+          - **armeabi-v7a**: Legacy devices (2012-2015)
           
-          ## Verificación
+          ## Verification
           ```bash
-          # Verificar checksum
+          # Verify checksum
           sha256sum -c tor.sha256
           
-          # Verificar que es binario Android
+          # Verify Android binary
           file tor
           ```
           
-          ## Detalles de build
+          ## Build Details
           - **Tor version**: ${{ env.TOR_VERSION }}
           - **Android NDK**: ${{ env.NDK_VERSION }}
           - **Build date**: $(date -u -Iseconds)
+          - **Supported ABIs**: arm64-v8a, armeabi-v7a
           
-          ## Uso
-          Copiar los bins a `app/src/main/jniLibs/<architecture>/tor`
+          ## Usage
+          Copy binaries to your Android project:
+          ```
+          app/src/main/jniLibs/
+          ├── arm64-v8a/tor
+          └── armeabi-v7a/tor
+          ```

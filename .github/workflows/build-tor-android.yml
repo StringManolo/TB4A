@@ -30,7 +30,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential autoconf automake libtool pkg-config \
-            cmake ninja-build gettext git zlib1g-dev
+            cmake ninja-build gettext git zlib1g-dev perl
 
       - name: Env
         run: |
@@ -68,9 +68,10 @@ jobs:
       # ---------------------- OpenSSL ----------------------
       - name: Build OpenSSL
         env:
-          PATH: ${{ env.TOOLCHAIN }}:${{ env.PATH }}
+          PATH: ${{ env.TOOLCHAIN }}:/usr/bin:/bin
+          CC: clang
+          CXX: clang++
         run: |
-          export PATH="$TOOLCHAIN:/usr/bin:/bin"
           mkdir -p "$BUILD_ROOT"
           cd "$BUILD_ROOT"
 

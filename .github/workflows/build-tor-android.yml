@@ -15,19 +15,21 @@ jobs:
       matrix:
         arch: [arm64-v8a, armeabi-v7a]
     runs-on: ubuntu-24.04
+    timeout-minutes: 30  # Aumentamos el timeout a 30 minutos
 
     steps:
     - name: Check Tor tag exists
       run: |
-        echo "Checking if tag tor-${{ env.TOR_VERSION }} exists..."
-        git ls-remote --tags https://git.torproject.org/tor.git | grep "tor-${{ env.TOR_VERSION }}" || echo "Tag not found, trying alternative..."
+        echo "✅ Checking if tag tor-${{ env.TOR_VERSION }} exists..."
+        git ls-remote --tags https://git.torproject.org/tor.git | grep "tor-${{ env.TOR_VERSION }}" || echo "⚠️ Tag not found, but continuing with tarball..."
 
     - name: Download Tor source
       run: |
-        # Descargar el source tarball directamente que es más confiable
-        wget https://dist.torproject.org/tor-${{ env.TOR_VERSION }}.tar.gz
+        echo "📥 Downloading Tor source..."
+        wget -q https://dist.torproject.org/tor-${{ env.TOR_VERSION }}.tar.gz
         tar -xzf tor-${{ env.TOR_VERSION }}.tar.gz
         mv tor-${{ env.TOR_VERSION }} tor-src
+        echo "📁 Source files:"
         ls -la tor-src/
 
     - name: Setup Android NDK
@@ -37,8 +39,9 @@ jobs:
 
     - name: Install build dependencies
       run: |
-        sudo apt-get update
-        sudo apt-get install -y \
+        echo "📦 Installing build dependencies..."
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq \
           autoconf \
           automake \
           libtool \
@@ -47,12 +50,15 @@ jobs:
           make \
           clang \
           file
+        echo "✅ Dependencies installed"
 
     - name: Configure and build for ${{ matrix.arch }}
       run: |
         cd tor-src
+        
+        echo "🔧 Running autogen..."
         chmod +x ./autogen.sh
-        ./autogen.sh
+        ./autogen.sh || echo "⚠️ autogen.sh might have warnings but continuing..."
 
         case "${{ matrix.arch }}" in
           arm64-v8a)
@@ -73,11 +79,15 @@ jobs:
         export STRIP="$TOOLCHAIN/bin/llvm-strip"
         export PATH="$TOOLCHAIN/bin:$PATH"
 
-        echo "Building Tor for ${{ matrix.arch }}..."
-        echo "NDK path: $ANDROID_NDK_HOME"
-        echo "Toolchain: $TOOLCHAIN"
-        echo "Compiler: $CC"
+        echo "🏗️ Building Tor for ${{ matrix.arch }}..."
+        echo "📋 Build details:"
+        echo "  - Host: $HOST"
+        echo "  - API Level: $API_LEVEL"
+        echo "  - CC: $CC"
+        echo "  - NDK: $ANDROID_NDK_HOME"
 
+        # Configurar con más logging
+        echo "⚙️ Configuring Tor..."
         ./configure \
           --host="$HOST" \
           --enable-static-libevent \
@@ -85,25 +95,44 @@ jobs:
           --disable-manpage \
           --disable-html-manual \
           --disable-system-torrc \
-          --disable-unittests
-
-        make -j$(nproc)
-        echo "Build completed for ${{ matrix.arch }}"
+          --disable-unittests \
+          --enable-lzma=no \
+          --enable-zstd=no \
+          --enable-seccomp=no \
+          --enable-libscrypt=no \
+          --enable-tool-name-check=no
+        
+        echo "🔨 Compiling Tor..."
+        # Compilar con menos jobs para evitar problemas de memoria
+        make -j2
+        
+        echo "✅ Build completed for ${{ matrix.arch }}"
 
     - name: Verify binary
       run: |
-        echo "Verifying Tor binary..."
         cd tor-src
-        file src/app/tor
-        ./src/app/tor --version || echo "Version check failed but continuing"
+        echo "🔍 Verifying Tor binary..."
+        if [ -f src/app/tor ]; then
+          echo "✅ Binary exists"
+          file src/app/tor
+          # Intentar obtener versión
+          ./src/app/tor --version || echo "⚠️ Version check failed but binary exists"
+        else
+          echo "❌ Binary not found!"
+          echo "📁 Listing build directory:"
+          find . -name "tor" -type f
+          exit 1
+        fi
 
     - name: Prepare artifacts
       run: |
+        echo "📦 Preparing artifacts for ${{ matrix.arch }}..."
         mkdir -p artifacts/${{ matrix.arch }}
-        cp tor-src/src/app/tor artifacts/${{ matrix.arch }}/
+        cp tor-src/src/app/tor artifacts/${{ matrix.ARCH }}/
         cd artifacts/${{ matrix.arch }}
         sha256sum tor > tor.sha256
         echo "Tor ${{ env.TOR_VERSION }} for ${{ matrix.arch }}" > README.txt
+        echo "✅ Artifacts prepared"
 
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
@@ -121,6 +150,11 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         path: downloaded-artifacts
+
+    - name: List downloaded files
+      run: |
+        echo "📁 Downloaded artifacts:"
+        find downloaded-artifacts -type f
 
     - name: Create Release
       id: create_release

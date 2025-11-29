@@ -77,8 +77,7 @@ jobs:
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
           export STRIP="$TOOLCHAIN/llvm-strip"
 
-          ./Configure "$OPENSSL_TARGET" no-shared no-tests -D__ANDROID_API__=$API \
-            --prefix="$BUILD_ROOT/openssl_install"
+          ./Configure "$OPENSSL_TARGET" no-shared no-tests -D__ANDROID_API__=$API --prefix="$BUILD_ROOT/openssl_install"
 
           make -j$(nproc)
           make install_sw
@@ -177,7 +176,7 @@ jobs:
             --disable-tool-name-check \
             --disable-zstd \
             CFLAGS="$CFLAGS -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/libevent_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include" \
-            LDFLAGS="$LDFLAGS -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/libevent_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib"
+            LDFLAGS="$LDFLAGS -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/libevent_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib -ldl"
 
           make -j$(nproc)
           make install
@@ -187,3 +186,4 @@ jobs:
         with:
           name: tor-${{ matrix.abi }}
           path: ${{ env.BUILD_ROOT }}/tor_install
+

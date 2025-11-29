@@ -164,13 +164,17 @@ jobs:
           make -j$(nproc)
           make install
 
-      - name: TLS Alignment Verification
+      - name: TLS Alignment Postscript (final verification)
         run: |
           set -euo pipefail
           TOR_BIN="${{ env.BUILD_ROOT }}/tor_install/bin/tor"
+          echo "=== Tor Binary Info ==="
           file "$TOR_BIN" || true
+          echo "=== TLS Segment Info ==="
           readelf -l "$TOR_BIN" | sed -n '1,200p'
+          echo "=== TLS Section Info ==="
           readelf -S "$TOR_BIN" | sed -n '1,200p' || true
+          echo "=== LOAD Segment Alignment Check ==="
           readelf -l "$TOR_BIN" | grep LOAD | head -n 6 || true
 
       - name: Upload Tor artifact

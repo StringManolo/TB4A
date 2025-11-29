@@ -118,8 +118,6 @@ jobs:
             ;;
         esac
 
-        export CC="${{ env.TOOLCHAIN }}/bin/${{ env.TARGET_TRIPLET }}${{ env.API_LEVEL }}-clang"
-        export CXX="${{ env.TOOLCHAIN }}/bin/${{ env.TARGET_TRIPLET }}${{ env.API_LEVEL }}-clang++"
         export AR="${{ env.AR }}"
 
         ./Configure $TARGET_CONFIG \

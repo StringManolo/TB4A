@@ -1,4 +1,4 @@
-name: Build Tor for Android
+name: Build Tor for Android (Bionic-safe TLS)
 
 on:
   workflow_dispatch:
@@ -61,7 +61,7 @@ jobs:
           echo "RANLIB=$TOOLCHAIN/llvm-ranlib" >> $GITHUB_ENV
           echo "STRIP=$TOOLCHAIN/llvm-strip" >> $GITHUB_ENV
 
-      - name: Build OpenSSL
+      - name: Build OpenSSL with TLS alignment
         env:
           PATH: ${{ env.TOOLCHAIN }}:/usr/bin:/bin
         run: |
@@ -69,6 +69,8 @@ jobs:
           cd "$BUILD_ROOT/openssl_build"
           git clone --depth=1 --branch=openssl-3.2 https://github.com/openssl/openssl.git openssl_src
           cd openssl_src
+          # Patch TLS variables to force alignment
+          sed -i "s/static __thread/static __thread __attribute__((aligned($TLS_ALIGN)))/g" crypto/threads/*.c || true
           export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
           export AR="$TOOLCHAIN/llvm-ar"
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
@@ -114,12 +116,14 @@ jobs:
           make -j$(nproc)
           make install
 
-      - name: Build libevent
+      - name: Build libevent with TLS alignment
         run: |
           cd "$BUILD_ROOT"
           git clone --depth=1 --branch=release-2.1.12-stable https://github.com/libevent/libevent.git libevent
           cd libevent
           ./autogen.sh
+          # Patch TLS variables
+          sed -i "s/static __thread/static __thread __attribute__((aligned($TLS_ALIGN)))/g" event2/thread_* || true
           export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
           export AR="$TOOLCHAIN/llvm-ar"
           export RANLIB="$TOOLCHAIN/llvm-ranlib"

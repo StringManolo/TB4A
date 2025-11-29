@@ -28,7 +28,7 @@ jobs:
       - name: Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential autoconf automake libtool pkg-config cmake ninja-build gettext git zlib1g-dev perl
+          sudo apt-get install -y build-essential autoconf automake libtool pkg-config cmake ninja-build gettext git zlib1g-dev perl liblzma-dev
 
       - name: Env
         run: |
@@ -82,6 +82,38 @@ jobs:
 
           make -j$(nproc)
           make install_sw
+
+      - name: Build xz (LZMA)
+        env:
+          PATH: ${{ env.TOOLCHAIN }}:/usr/bin:/bin
+        run: |
+          mkdir -p "$BUILD_ROOT/xz_build"
+          cd "$BUILD_ROOT/xz_build"
+          git clone https://github.com/tukaani-project/xz.git --depth=1 --branch=v5.4.6 xz_src
+          cd xz_src
+
+          export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
+          export CXX="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang++"
+          export AR="$TOOLCHAIN/llvm-ar"
+          export RANLIB="$TOOLCHAIN/llvm-ranlib"
+          export STRIP="$TOOLCHAIN/llvm-strip"
+
+          ./autogen.sh
+          ./configure \
+            --host="$HOST_TRIPLE" \
+            --prefix="$BUILD_ROOT/xz_install" \
+            --disable-shared \
+            --enable-static \
+            --disable-xz \
+            --disable-xzdec \
+            --disable-lzmadec \
+            --disable-lzmainfo \
+            --disable-scripts \
+            CFLAGS="$CFLAGS" \
+            LDFLAGS="$LDFLAGS"
+
+          make -j$(nproc)
+          make install
 
       - name: Build libevent
         run: |
@@ -140,9 +172,10 @@ jobs:
             --with-openssl-dir="$BUILD_ROOT/openssl_install" \
             --with-libevent-dir="$BUILD_ROOT/libevent_install" \
             --with-zlib-dir="$BUILD_ROOT/zlib_install" \
+            --with-lzma-dir="$BUILD_ROOT/xz_install" \
             --disable-tool-name-check \
-            CFLAGS="$CFLAGS -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/libevent_install/include -I$BUILD_ROOT/zlib_install/include" \
-            LDFLAGS="$LDFLAGS -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/libevent_install/lib -L$BUILD_ROOT/zlib_install/lib"
+            CFLAGS="$CFLAGS -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/libevent_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include" \
+            LDFLAGS="$LDFLAGS -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/libevent_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib"
 
           make -j$(nproc)
           make install

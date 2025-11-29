@@ -40,18 +40,12 @@ jobs:
           make \
           clang \
           file
-        echo "=== Versiones instaladas ==="
-        autoconf --version | head -1
-        automake --version | head -1
-        libtool --version | head -1
-        clang --version | head -1
 
     - name: Configure and build for ${{ matrix.arch }}
       run: |
         chmod +x ./autogen.sh
         ./autogen.sh
 
-        # Configurar para arquitectura específica
         case "${{ matrix.arch }}" in
           arm64-v8a)
             export HOST="aarch64-linux-android"
@@ -71,15 +65,7 @@ jobs:
         export STRIP="$TOOLCHAIN/bin/llvm-strip"
         export PATH="$TOOLCHAIN/bin:$PATH"
 
-        echo "=== Configuración de compilación ==="
-        echo "Arquitectura: ${{ matrix.arch }}"
-        echo "Tor version: ${{ env.TOR_VERSION }}"
-        echo "NDK version: ${{ env.NDK_VERSION }}"
-        echo "Host: $HOST"
-        echo "API Level: $API_LEVEL"
-        echo "Compiler: $CC"
-        echo "Toolchain: $TOOLCHAIN"
-
+        echo "Building Tor for ${{ matrix.arch }}..."
         ./configure \
           --host="$HOST" \
           --enable-static-libevent \
@@ -89,69 +75,78 @@ jobs:
           --disable-system-torrc \
           --disable-unittests
 
-        echo "=== Iniciando compilación ==="
         make -j$(nproc)
-        echo "✅ Build completado exitosamente"
+        echo "Build completed for ${{ matrix.arch }}"
 
     - name: Verify binary
       run: |
-        echo "=== Verificando binario ==="
+        echo "Verifying Tor binary..."
         file src/app/tor
-        echo "=== Información ELF ==="
-        $TOOLCHAIN/bin/llvm-readelf -h src/app/tor || echo "⚠️  No se pudo leer ELF header, pero continuamos..."
-        echo "=== Versión de Tor ==="
-        ./src/app/tor --version || echo "⚠️  No se pudo verificar versión, pero continuamos..."
+        ./src/app/tor --version || echo "Version check failed but continuing"
 
     - name: Prepare artifacts
       run: |
         mkdir -p artifacts/${{ matrix.arch }}
         cp src/app/tor artifacts/${{ matrix.arch }}/
-        cp src/app/tor artifacts/${{ matrix.arch }}/tor-${{ env.TOR_VERSION }}-${{ matrix.arch }}
-
-        # Crear checksums
         cd artifacts/${{ matrix.arch }}
         sha256sum tor > tor.sha256
-        sha256sum tor-${{ env.TOR_VERSION }}-${{ matrix.arch }} > tor-${{ env.TOR_VERSION }}-${{ matrix.arch }}.sha256
+        echo "Tor ${{ env.TOR_VERSION }} for ${{ matrix.arch }}" > README.txt
 
-        cat > README.txt << EOF
-Tor ${{ env.TOR_VERSION }} for ${{ matrix.arch }}
-
-Built on: $(date -u)
-GitHub Run ID: $GITHUB_RUN_ID
-NDK Version: ${{ env.NDK_VERSION }}
-Architecture: ${{ matrix.arch }}
-
-Usage: Copy to app/src/main/jniLibs/${{ matrix.arch }}/tor
-EOF
-
-    - name: Upload artifacts
+    - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
         name: tor-${{ matrix.arch }}-${{ env.TOR_VERSION }}
         path: artifacts/${{ matrix.arch }}/
-        retention-days: 90
 
-    - name: Create GitHub Release
-      if: startsWith(github.ref, 'refs/tags/tor-')
-      uses: softprops/action-gh-release@v2
+  create-release:
+    needs: build
+    runs-on: ubuntu-24.04
+    if: startsWith(github.ref, 'refs/tags/tor-')
+    
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
       with:
-        files: |
-          artifacts/arm64-v8a/tor
-          artifacts/arm64-v8a/tor.sha256
-          artifacts/armeabi-v7a/tor
-          artifacts/armeabi-v7a/tor.sha256
+        path: downloaded-artifacts
+
+    - name: List downloaded files
+      run: find downloaded-artifacts -type f
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref_name }}
+        release_name: Tor ${{ env.TOR_VERSION }} for Android
         body: |
-          Tor ${{ env.TOR_VERSION }} for Android
+          Tor ${{ env.TOR_VERSION }} compiled for Android
           
-          Supported Architectures:
-          - arm64-v8a: Modern devices (2015+)
-          - armeabi-v7a: Legacy devices (2012-2015)
+          Architectures included:
+          - arm64-v8a (modern devices)
+          - armeabi-v7a (legacy devices)
           
-          Verification:
-          - Verify checksum: sha256sum -c tor.sha256
-          - Verify Android binary: file tor
-          
-          Build Details:
-          - Tor version: ${{ env.TOR_VERSION }}
-          - Android NDK: ${{ env.NDK_VERSION }}
-          - Build date: $(date -u -Iseconds)
+          Built with Android NDK ${{ env.NDK_VERSION }}
+        draft: false
+        prerelease: false
+
+    - name: Upload ARM64 Binary
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: downloaded-artifacts/tor-arm64-v8a-${{ env.TOR_VERSION }}/tor
+        asset_name: tor-android-arm64-v8a
+        asset_content_type: application/octet-stream
+
+    - name: Upload ARMv7 Binary
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: downloaded-artifacts/tor-armeabi-v7a-${{ env.TOR_VERSION }}/tor
+        asset_name: tor-android-armeabi-v7a
+        asset_content_type: application/octet-stream

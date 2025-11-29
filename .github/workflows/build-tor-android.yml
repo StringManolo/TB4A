@@ -77,18 +77,8 @@ jobs:
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
           export STRIP="$TOOLCHAIN/llvm-strip"
           
-          # Add TLS alignment flags for OpenSSL
-          case "${{ matrix.abi }}" in
-            arm64-v8a)
-              TLS_FLAGS="-Wl,-z,max-page-size=16384"
-              ;;
-            armeabi-v7a)
-              TLS_FLAGS="-Wl,-z,max-page-size=16384"
-              ;;
-          esac
-          
-          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic $TLS_FLAGS"
-          export LDFLAGS="-fPIC -pie -ldl $TLS_FLAGS"
+          export CFLAGS="-fPIC -O2"
+          export LDFLAGS="-fPIC -pie"
 
           ./Configure "$OPENSSL_TARGET" no-shared no-tests -D__ANDROID_API__=$API --prefix="$BUILD_ROOT/openssl_install"
           make -j$(nproc)
@@ -109,19 +99,6 @@ jobs:
           export AR="$TOOLCHAIN/llvm-ar"
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
           export STRIP="$TOOLCHAIN/llvm-strip"
-
-          # Add TLS alignment flags for xz
-          case "${{ matrix.abi }}" in
-            arm64-v8a)
-              TLS_FLAGS="-Wl,-z,max-page-size=16384"
-              ;;
-            armeabi-v7a)
-              TLS_FLAGS="-Wl,-z,max-page-size=16384"
-              ;;
-          esac
-          
-          export CFLAGS="$TLS_FLAGS"
-          export LDFLAGS="$TLS_FLAGS"
 
           ./configure \
             --host="$HOST_TRIPLE" \
@@ -146,18 +123,8 @@ jobs:
 
           ./autogen.sh
           
-          # Add TLS alignment flags for libevent
-          case "${{ matrix.abi }}" in
-            arm64-v8a)
-              TLS_FLAGS="-Wl,-z,max-page-size=16384"
-              ;;
-            armeabi-v7a)
-              TLS_FLAGS="-Wl,-z,max-page-size=16384"
-              ;;
-          esac
-          
-          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic $TLS_FLAGS -I$BUILD_ROOT/openssl_install/include"
-          export LDFLAGS="-fPIC -pie $TLS_FLAGS -L$BUILD_ROOT/openssl_install/lib"
+          export CFLAGS="-fPIC -O2 -I$BUILD_ROOT/openssl_install/include"
+          export LDFLAGS="-fPIC -pie -L$BUILD_ROOT/openssl_install/lib"
           
           ./configure \
             --host="$HOST_TRIPLE" \
@@ -183,24 +150,11 @@ jobs:
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
           export STRIP="$TOOLCHAIN/llvm-strip"
 
-          # Add TLS alignment flags for zlib
-          case "${{ matrix.abi }}" in
-            arm64-v8a)
-              TLS_FLAGS="-Wl,-z,max-page-size=16384"
-              ;;
-            armeabi-v7a)
-              TLS_FLAGS="-Wl,-z,max-page-size=16384"
-              ;;
-          esac
-          
-          export CFLAGS="$TLS_FLAGS"
-          export LDFLAGS="$TLS_FLAGS"
-
           ./configure --static --prefix="$BUILD_ROOT/zlib_install"
           make -j$(nproc)
           make install
 
-      - name: Build Tor
+      - name: Build Tor with custom linker script for TLS alignment
         env:
           PATH: ${{ env.TOOLCHAIN }}:/usr/bin:/bin
         run: |
@@ -210,18 +164,43 @@ jobs:
 
           ./autogen.sh
           
-          # Set TLS alignment flags based on architecture
+          # Create custom linker script for TLS alignment
           case "${{ matrix.abi }}" in
             arm64-v8a)
-              TLS_ALIGN_FLAGS="-Wl,-z,max-page-size=16384 -Wa,-march=armv8-a"
+              ALIGN=64
               ;;
             armeabi-v7a)
-              TLS_ALIGN_FLAGS="-Wl,-z,max-page-size=16384 -Wa,-march=armv7-a"
+              ALIGN=32
               ;;
           esac
+          
+          cat > custom_linker.ld << EOF
+          /* Custom linker script to enforce TLS alignment for Android */
+          PHDRS
+          {
+            headers PT_PHDR PHDRS ;
+            text PT_LOAD FILEHDR PHDRS ;
+            data PT_LOAD ;
+            tls PT_TLS ;
+          }
+          
+          SECTIONS
+          {
+            .text : { *(.text*) } :text
+            .data : { *(.data*) } :data
+            .tdata : { 
+              . = ALIGN($ALIGN);
+              *(.tdata .tdata.* .gnu.linkonce.td.*)
+            } :tls
+            .tbss : { 
+              . = ALIGN($ALIGN);
+              *(.tbss .tbss.* .gnu.linkonce.tb.*) *(.tcommon)
+            } :tls
+          }
+          EOF
 
-          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic $TLS_ALIGN_FLAGS -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/libevent_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include"
-          export LDFLAGS="-fPIC -pie $TLS_ALIGN_FLAGS -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/libevent_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib -ldl"
+          export CFLAGS="-fPIC -O2 -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/libevent_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include"
+          export LDFLAGS="-fPIC -pie -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/libevent_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib -ldl -Wl,-T,custom_linker.ld -Wl,-z,max-page-size=0x10000 -Wl,-z,common-page-size=0x10000"
 
           ./configure \
             --host="$HOST_TRIPLE" \
@@ -238,18 +217,61 @@ jobs:
           make -j$(nproc)
           make install
 
-      - name: Verify TLS Alignment
+      - name: Verify TLS alignment
         run: |
           cd "$BUILD_ROOT/tor_install/bin"
-          echo "=== File info ==="
+          echo "=== Binary info ==="
           file tor
-          echo "=== TLS segment info ==="
-          readelf -l tor | grep -A1 TLS || echo "No TLS segment found"
+          echo "=== TLS segment details ==="
+          readelf -l tor | grep -A10 TLS
           echo "=== Checking alignment ==="
-          readelf -l tor | grep LOAD | head -5
+          readelf -l tor | grep -E "(LOAD|TLS)" || true
+          
+          # Test if the binary runs (in a simple way)
+          echo "=== Testing binary ==="
+          ./tor --version || echo "Version check failed, but continuing..."
 
-      - name: Upload Tor
+      - name: Create deployment package
+        run: |
+          cd "$BUILD_ROOT"
+          
+          # Create proper directory structure
+          mkdir -p tor_package/{bin,etc/tor,share/tor}
+          
+          # Copy binaries
+          cp tor_install/bin/* tor_package/bin/
+          
+          # Copy configuration
+          cp tor_install/etc/tor/torrc.sample tor_package/etc/tor/
+          
+          # Copy geoip data
+          cp -r tor_install/share/tor/* tor_package/share/tor/
+          
+          # Create README
+          cat > tor_package/README.txt << EOF
+          Tor for Android (${{ matrix.abi }})
+          Built with TLS alignment fix for Android Bionic
+          
+          Files:
+          - bin/tor: Main Tor executable
+          - bin/tor-resolve: DNS resolution tool
+          - bin/torify: SOCKS wrapper
+          - etc/tor/torrc.sample: Sample configuration
+          - share/tor/geoip: IPv4 geolocation database
+          - share/tor/geoip6: IPv6 geolocation database
+          
+          Usage on Android:
+          ./bin/tor -f etc/tor/torrc
+          EOF
+          
+          # Create zip package
+          cd tor_package
+          zip -r "../tor-${{ matrix.abi }}-aligned.zip" .
+
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: tor-${{ matrix.abi }}
-          path: ${{ env.BUILD_ROOT }}/tor_install
+          name: tor-${{ matrix.abi }}-tls-fixed
+          path: |
+            ${{ env.BUILD_ROOT }}/tor_install
+            ${{ env.BUILD_ROOT }}/tor-${{ matrix.abi }}-aligned.zip

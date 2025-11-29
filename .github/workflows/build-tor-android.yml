@@ -70,6 +70,7 @@ jobs:
         env:
           PATH: ${{ env.TOOLCHAIN }}:${{ env.PATH }}
         run: |
+          export PATH="$TOOLCHAIN:/usr/bin:/bin"
           mkdir -p "$BUILD_ROOT"
           cd "$BUILD_ROOT"
 

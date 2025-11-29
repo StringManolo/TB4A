@@ -76,8 +76,19 @@ jobs:
           export AR="$TOOLCHAIN/llvm-ar"
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
           export STRIP="$TOOLCHAIN/llvm-strip"
-          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic"
-          export LDFLAGS="-fPIC -pie -ldl"
+          
+          # Add TLS alignment flags for OpenSSL
+          case "${{ matrix.abi }}" in
+            arm64-v8a)
+              TLS_FLAGS="-Wl,-z,max-page-size=16384"
+              ;;
+            armeabi-v7a)
+              TLS_FLAGS="-Wl,-z,max-page-size=16384"
+              ;;
+          esac
+          
+          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic $TLS_FLAGS"
+          export LDFLAGS="-fPIC -pie -ldl $TLS_FLAGS"
 
           ./Configure "$OPENSSL_TARGET" no-shared no-tests -D__ANDROID_API__=$API --prefix="$BUILD_ROOT/openssl_install"
           make -j$(nproc)
@@ -98,6 +109,19 @@ jobs:
           export AR="$TOOLCHAIN/llvm-ar"
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
           export STRIP="$TOOLCHAIN/llvm-strip"
+
+          # Add TLS alignment flags for xz
+          case "${{ matrix.abi }}" in
+            arm64-v8a)
+              TLS_FLAGS="-Wl,-z,max-page-size=16384"
+              ;;
+            armeabi-v7a)
+              TLS_FLAGS="-Wl,-z,max-page-size=16384"
+              ;;
+          esac
+          
+          export CFLAGS="$TLS_FLAGS"
+          export LDFLAGS="$TLS_FLAGS"
 
           ./configure \
             --host="$HOST_TRIPLE" \
@@ -121,8 +145,20 @@ jobs:
           cd libevent
 
           ./autogen.sh
-          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic -I$BUILD_ROOT/openssl_install/include"
-          export LDFLAGS="-fPIC -pie -L$BUILD_ROOT/openssl_install/lib"
+          
+          # Add TLS alignment flags for libevent
+          case "${{ matrix.abi }}" in
+            arm64-v8a)
+              TLS_FLAGS="-Wl,-z,max-page-size=16384"
+              ;;
+            armeabi-v7a)
+              TLS_FLAGS="-Wl,-z,max-page-size=16384"
+              ;;
+          esac
+          
+          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic $TLS_FLAGS -I$BUILD_ROOT/openssl_install/include"
+          export LDFLAGS="-fPIC -pie $TLS_FLAGS -L$BUILD_ROOT/openssl_install/lib"
+          
           ./configure \
             --host="$HOST_TRIPLE" \
             --prefix="$BUILD_ROOT/libevent_install" \
@@ -147,6 +183,19 @@ jobs:
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
           export STRIP="$TOOLCHAIN/llvm-strip"
 
+          # Add TLS alignment flags for zlib
+          case "${{ matrix.abi }}" in
+            arm64-v8a)
+              TLS_FLAGS="-Wl,-z,max-page-size=16384"
+              ;;
+            armeabi-v7a)
+              TLS_FLAGS="-Wl,-z,max-page-size=16384"
+              ;;
+          esac
+          
+          export CFLAGS="$TLS_FLAGS"
+          export LDFLAGS="$TLS_FLAGS"
+
           ./configure --static --prefix="$BUILD_ROOT/zlib_install"
           make -j$(nproc)
           make install
@@ -160,8 +209,19 @@ jobs:
           cd tor
 
           ./autogen.sh
-          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/libevent_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include"
-          export LDFLAGS="-fPIC -pie -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/libevent_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib -ldl"
+          
+          # Set TLS alignment flags based on architecture
+          case "${{ matrix.abi }}" in
+            arm64-v8a)
+              TLS_ALIGN_FLAGS="-Wl,-z,max-page-size=16384 -Wa,-march=armv8-a"
+              ;;
+            armeabi-v7a)
+              TLS_ALIGN_FLAGS="-Wl,-z,max-page-size=16384 -Wa,-march=armv7-a"
+              ;;
+          esac
+
+          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic $TLS_ALIGN_FLAGS -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/libevent_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include"
+          export LDFLAGS="-fPIC -pie $TLS_ALIGN_FLAGS -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/libevent_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib -ldl"
 
           ./configure \
             --host="$HOST_TRIPLE" \
@@ -178,9 +238,18 @@ jobs:
           make -j$(nproc)
           make install
 
+      - name: Verify TLS Alignment
+        run: |
+          cd "$BUILD_ROOT/tor_install/bin"
+          echo "=== File info ==="
+          file tor
+          echo "=== TLS segment info ==="
+          readelf -l tor | grep -A1 TLS || echo "No TLS segment found"
+          echo "=== Checking alignment ==="
+          readelf -l tor | grep LOAD | head -5
+
       - name: Upload Tor
         uses: actions/upload-artifact@v4
         with:
           name: tor-${{ matrix.abi }}
           path: ${{ env.BUILD_ROOT }}/tor_install
-

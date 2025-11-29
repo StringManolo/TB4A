@@ -1,4 +1,4 @@
-name: Build Tor for Android
+name: Build Tor for Android (Bionic-safe TLS, robust)
 
 on:
   workflow_dispatch:
@@ -10,7 +10,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-
     strategy:
       fail-fast: false
       matrix:
@@ -25,16 +24,14 @@ jobs:
           ndk-version: r27c
           add-to-path: true
 
-      - name: Dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential autoconf automake libtool \
-            pkg-config cmake ninja-build gettext autopoint texinfo docbook2x \
-            git zlib1g-dev perl liblzma-dev wget
+          sudo apt-get install -y build-essential autoconf automake libtool pkg-config cmake ninja-build gettext autopoint texinfo docbook2x git zlib1g-dev perl liblzma-dev wget
 
-      - name: Env
+      - name: Setup environment
         run: |
-          API=21
+          export API=21
           case "${{ matrix.abi }}" in
             arm64-v8a)
               HOST_TRIPLE="aarch64-linux-android"
@@ -47,149 +44,138 @@ jobs:
               TLS_ALIGN=32
               ;;
           esac
-
           TOOLCHAIN="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
           BUILD_ROOT="$GITHUB_WORKSPACE/build/${{ matrix.abi }}"
-
+          mkdir -p "$BUILD_ROOT"
           echo "API=$API" >> $GITHUB_ENV
           echo "HOST_TRIPLE=$HOST_TRIPLE" >> $GITHUB_ENV
           echo "OPENSSL_TARGET=$OPENSSL_TARGET" >> $GITHUB_ENV
           echo "TOOLCHAIN=$TOOLCHAIN" >> $GITHUB_ENV
           echo "BUILD_ROOT=$BUILD_ROOT" >> $GITHUB_ENV
           echo "TLS_ALIGN=$TLS_ALIGN" >> $GITHUB_ENV
-
           echo "CC=$TOOLCHAIN/${HOST_TRIPLE}${API}-clang" >> $GITHUB_ENV
           echo "CXX=$TOOLCHAIN/${HOST_TRIPLE}${API}-clang++" >> $GITHUB_ENV
           echo "AR=$TOOLCHAIN/llvm-ar" >> $GITHUB_ENV
           echo "RANLIB=$TOOLCHAIN/llvm-ranlib" >> $GITHUB_ENV
           echo "STRIP=$TOOLCHAIN/llvm-strip" >> $GITHUB_ENV
 
-      # ===================== OpenSSL =====================
       - name: Build OpenSSL
+        env:
+          PATH: ${{ env.TOOLCHAIN }}:/usr/bin:/bin
         run: |
-          mkdir -p "$BUILD_ROOT/openssl"
-          cd "$BUILD_ROOT/openssl"
-          git clone https://github.com/openssl/openssl.git --depth=1 --branch=openssl-3.2 src
-          cd src
-
-          export CFLAGS="-fPIC -O2 -pthread -ftls-model=initial-exec"
-          export LDFLAGS="-pthread -Wl,-z,max-page-size=16384"
-
-          ./Configure "$OPENSSL_TARGET" no-shared -D__ANDROID_API__=$API \
-            --prefix="$BUILD_ROOT/openssl_install"
-
+          set -euo pipefail
+          mkdir -p "$BUILD_ROOT/openssl_build"
+          cd "$BUILD_ROOT/openssl_build"
+          git clone --depth=1 --branch=openssl-3.2 https://github.com/openssl/openssl.git openssl_src
+          cd openssl_src
+          find . -type f -name '*.c' -o -name '*.h' | xargs grep -IlE '(__thread|THREAD_LOCAL|THREAD_VAR|THREAD_LOCAL_DECL)' || true
+          perl -i -pe "s/\\b(static\\s+)?(__thread)\\b/\\1__thread __attribute__((aligned(${TLS_ALIGN})))/g" $(git ls-files | grep -E '\.(c|h)$' || true) || true
+          perl -i -pe "s/\\bTHREAD_LOCAL\\b/THREAD_LOCAL __attribute__((aligned(${TLS_ALIGN})))/g" $(git ls-files | grep -E '\.(c|h)$' || true) || true
+          grep -R "aligned(${TLS_ALIGN})" || true
+          export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
+          export AR="$TOOLCHAIN/llvm-ar"
+          export RANLIB="$TOOLCHAIN/llvm-ranlib"
+          export STRIP="$TOOLCHAIN/llvm-strip"
+          export CFLAGS="-fPIC -O2 -ftls-model=initial-exec -pthread -Wl,-z,max-page-size=16384"
+          export LDFLAGS="-fPIC -pie -pthread -Wl,-z,max-page-size=16384 -ldl"
+          ./Configure "$OPENSSL_TARGET" no-shared -D__ANDROID_API__=$API --prefix="$BUILD_ROOT/openssl_install"
           make -j$(nproc)
           make install_sw
 
-      # ===================== XZ =====================
-      - name: Build xz
-        run: |
-          mkdir -p "$BUILD_ROOT/xz"
-          cd "$BUILD_ROOT/xz"
-          wget https://tukaani.org/xz/xz-5.4.5.tar.gz
-          tar -xzf xz-5.4.5.tar.gz
-          cd xz-5.4.5
-
-          export CFLAGS="-fPIC -O2"
-          export LDFLAGS="-Wl,-z,max-page-size=16384"
-
-          ./configure --host="$HOST_TRIPLE" \
-            --prefix="$BUILD_ROOT/xz_install" \
-            --disable-shared --enable-static --disable-nls
-
-          make -j$(nproc)
-          make install
-
-      # ===================== libevent =====================
-      - name: Build libevent
-        run: |
-          cd "$BUILD_ROOT"
-          git clone https://github.com/libevent/libevent.git --branch=release-2.1.12-stable --depth=1
-          cd libevent
-          ./autogen.sh
-
-          export CFLAGS="-fPIC -O2 -pthread -ftls-model=initial-exec -I$BUILD_ROOT/openssl_install/include"
-          export LDFLAGS="-pthread -Wl,-z,max-page-size=16384 -L$BUILD_ROOT/openssl_install/lib"
-
-          ./configure --host="$HOST_TRIPLE" \
-            --prefix="$BUILD_ROOT/libevent_install" \
-            --disable-shared --enable-static
-
-          make -j$(nproc)
-          make install
-
-      # ===================== zlib =====================
       - name: Build zlib
+        env:
+          PATH: ${{ env.TOOLCHAIN }}:/usr/bin:/bin
         run: |
-          mkdir -p "$BUILD_ROOT/zlib"
-          cd "$BUILD_ROOT/zlib"
-          git clone https://github.com/madler/zlib.git --depth=1 --branch=v1.3.1
-          cd zlib
-
-          export CFLAGS="-fPIC -O2"
-          export LDFLAGS="-Wl,-z,max-page-size=16384"
-
+          set -euo pipefail
+          mkdir -p "$BUILD_ROOT/zlib_build"
+          cd "$BUILD_ROOT/zlib_build"
+          git clone --depth=1 --branch=v1.3.1 https://github.com/madler/zlib.git zlib_src
+          cd zlib_src
+          export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
+          export AR="$TOOLCHAIN/llvm-ar"
+          export RANLIB="$TOOLCHAIN/llvm-ranlib"
+          export CFLAGS="-fPIC -O2 -ftls-model=initial-exec -Wl,-z,max-page-size=16384"
+          export LDFLAGS="-fPIC -pie -Wl,-z,max-page-size=16384"
           ./configure --static --prefix="$BUILD_ROOT/zlib_install"
           make -j$(nproc)
           make install
 
-      # ===================== Tor + TLS Dummy =====================
-      - name: Build Tor
+      - name: Build xz
+        env:
+          PATH: ${{ env.TOOLCHAIN }}:/usr/bin:/bin
         run: |
-          cd "$BUILD_ROOT"
-          git clone https://git.torproject.org/tor.git --branch=release-0.4.8 --depth=1
-          cd tor
-
-          cat > src/lib/tor_tls_dummy.c <<EOF
-          #include <stdint.h>
-          static __thread volatile char tor_tls_dummy __attribute__((aligned($TLS_ALIGN))) = 0;
-          void *tor_force_tls_dummy(void){ return (void*)&tor_tls_dummy; }
-          __attribute__((constructor))
-          static void tor_force_tls_ctor(void){ tor_force_tls_dummy(); }
-          EOF
-
-          echo "libtor_a_SOURCES += tor_tls_dummy.c" >> src/lib/Makefile.am
-
-          ./autogen.sh
-
-          export CFLAGS="-O2 -fPIC -pthread -ftls-model=initial-exec \
-            -I$BUILD_ROOT/openssl_install/include \
-            -I$BUILD_ROOT/libevent_install/include \
-            -I$BUILD_ROOT/zlib_install/include \
-            -I$BUILD_ROOT/xz_install/include"
-
-          export LDFLAGS="-pthread -Wl,-z,max-page-size=16384 \
-            -L$BUILD_ROOT/openssl_install/lib \
-            -L$BUILD_ROOT/libevent_install/lib \
-            -L$BUILD_ROOT/zlib_install/lib \
-            -L$BUILD_ROOT/xz_install/lib"
-
-          ./configure --host="$HOST_TRIPLE" \
-            --prefix="$BUILD_ROOT/tor_install" \
-            --enable-static-tor \
-            --with-openssl-dir="$BUILD_ROOT/openssl_install" \
-            --with-libevent-dir="$BUILD_ROOT/libevent_install" \
-            --with-zlib-dir="$BUILD_ROOT/zlib_install" \
-            --with-lzma-dir="$BUILD_ROOT/xz_install" \
-            --disable-zstd --disable-asciidoc
-
+          set -euo pipefail
+          mkdir -p "$BUILD_ROOT/xz_build"
+          cd "$BUILD_ROOT/xz_build"
+          wget https://tukaani.org/xz/xz-5.4.5.tar.gz
+          tar -xzf xz-5.4.5.tar.gz
+          cd xz-5.4.5
+          export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
+          export AR="$TOOLCHAIN/llvm-ar"
+          export RANLIB="$TOOLCHAIN/llvm-ranlib"
+          export CFLAGS="-fPIC -O2 -ftls-model=initial-exec -Wl,-z,max-page-size=16384"
+          export LDFLAGS="-fPIC -pie -Wl,-z,max-page-size=16384"
+          ./configure --host="$HOST_TRIPLE" --prefix="$BUILD_ROOT/xz_install" --disable-shared --enable-static --disable-xz --disable-xzdec --disable-lzmadec --disable-lzmainfo --disable-scripts --disable-nls
           make -j$(nproc)
           make install
 
-      # ===================== TLS POSTSCRIPT =====================
-      - name: TLS Postmortem
+      - name: Build libevent
         run: |
-          echo "=== FINAL TLS CHECK ==="
-          readelf -l "$BUILD_ROOT/tor_install/bin/tor" | grep -A2 TLS || true
-          echo "=== TLS SECTIONS ==="
-          readelf -S "$BUILD_ROOT/tor_install/bin/tor" | grep -E "tdata|tbss" || true
-          echo "=== LOAD SEGMENTS ==="
-          readelf -l "$BUILD_ROOT/tor_install/bin/tor" | grep LOAD
+          set -euo pipefail
+          cd "$BUILD_ROOT"
+          git clone --depth=1 --branch=release-2.1.12-stable https://github.com/libevent/libevent.git libevent
+          cd libevent
+          ./autogen.sh || true
+          perl -i -pe "s/\\b(static\\s+)?(__thread)\\b/\\1__thread __attribute__((aligned(${TLS_ALIGN})))/g" $(git ls-files | grep -E '\.(c|h)$' || true) || true
+          perl -i -pe "s/\\bTHREAD_LOCAL\\b/THREAD_LOCAL __attribute__((aligned(${TLS_ALIGN})))/g" $(git ls-files | grep -E '\.(c|h)$' || true) || true
+          export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
+          export AR="$TOOLCHAIN/llvm-ar"
+          export RANLIB="$TOOLCHAIN/llvm-ranlib"
+          export CFLAGS="-fPIC -O2 -ftls-model=initial-exec -pthread -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include -Wl,-z,max-page-size=16384"
+          export LDFLAGS="-fPIC -pie -pthread -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib -ldl"
+          ./configure --host="$HOST_TRIPLE" --prefix="$BUILD_ROOT/libevent_install" --disable-shared --enable-static
+          make -j$(nproc)
+          make install
 
-      # ===================== ARTIFACT =====================
-      - name: Upload Tor
+      - name: Build Tor
+        env:
+          PATH: ${{ env.TOOLCHAIN }}:/usr/bin:/bin
+        run: |
+          set -euo pipefail
+          cd "$BUILD_ROOT"
+          git clone --depth=1 --branch=release-0.4.8 https://git.torproject.org/tor.git tor
+          cd tor
+          cat > src/lib/tor_tls_dummy.c <<EOF
+          #include <stdint.h>
+          __thread char tor_tls_dummy_var __attribute__((aligned(${TLS_ALIGN}))) = 0;
+          void *tor_force_tls_dummy(void) { return (void*)&tor_tls_dummy_var; }
+          EOF
+          if ! grep -q "tor_tls_dummy.c" src/lib/Makefile.am 2>/dev/null; then
+            echo "libtor_a_SOURCES += tor_tls_dummy.c" >> src/lib/Makefile.am
+          fi
+          ./autogen.sh
+          export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
+          export CXX="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang++"
+          export AR="$TOOLCHAIN/llvm-ar"
+          export RANLIB="$TOOLCHAIN/llvm-ranlib"
+          export STRIP="$TOOLCHAIN/llvm-strip"
+          export CFLAGS="-fPIC -O2 -ftls-model=initial-exec -pthread -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/libevent_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include -Wl,-z,max-page-size=16384"
+          export LDFLAGS="-fPIC -pie -pthread -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/libevent_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib -ldl -Wl,-u,tor_force_tls_dummy"
+          ./configure --host="$HOST_TRIPLE" --prefix="$BUILD_ROOT/tor_install" --disable-asciidoc --enable-static-tor --with-openssl-dir="$BUILD_ROOT/openssl_install" --with-libevent-dir="$BUILD_ROOT/libevent_install" --with-zlib-dir="$BUILD_ROOT/zlib_install" --with-lzma-dir="$BUILD_ROOT/xz_install" --disable-tool-name-check --disable-zstd
+          make -j$(nproc)
+          make install
+
+      - name: TLS Alignment Verification
+        run: |
+          set -euo pipefail
+          TOR_BIN="${{ env.BUILD_ROOT }}/tor_install/bin/tor"
+          file "$TOR_BIN" || true
+          readelf -l "$TOR_BIN" | sed -n '1,200p'
+          readelf -S "$TOR_BIN" | sed -n '1,200p' || true
+          readelf -l "$TOR_BIN" | grep LOAD | head -n 6 || true
+
+      - name: Upload Tor artifact
         uses: actions/upload-artifact@v4
         with:
           name: tor-${{ matrix.abi }}
-          path: ${{ env.BUILD_ROOT }}/tor_install/bin
-
+          path: ${{ env.BUILD_ROOT }}/tor_install/bin/tor

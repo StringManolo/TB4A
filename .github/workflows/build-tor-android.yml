@@ -37,10 +37,12 @@ jobs:
             arm64-v8a)
               HOST_TRIPLE="aarch64-linux-android"
               OPENSSL_TARGET="android-arm64"
+              TLS_ALIGN=64
               ;;
             armeabi-v7a)
               HOST_TRIPLE="armv7a-linux-androideabi"
               OPENSSL_TARGET="android-arm"
+              TLS_ALIGN=32
               ;;
           esac
 
@@ -52,6 +54,7 @@ jobs:
           echo "OPENSSL_TARGET=$OPENSSL_TARGET" >> $GITHUB_ENV
           echo "TOOLCHAIN=$TOOLCHAIN" >> $GITHUB_ENV
           echo "BUILD_ROOT=$BUILD_ROOT" >> $GITHUB_ENV
+          echo "TLS_ALIGN=$TLS_ALIGN" >> $GITHUB_ENV
 
           echo "CC=$TOOLCHAIN/${HOST_TRIPLE}${API}-clang" >> $GITHUB_ENV
           echo "CXX=$TOOLCHAIN/${HOST_TRIPLE}${API}-clang++" >> $GITHUB_ENV
@@ -59,8 +62,8 @@ jobs:
           echo "RANLIB=$TOOLCHAIN/llvm-ranlib" >> $GITHUB_ENV
           echo "STRIP=$TOOLCHAIN/llvm-strip" >> $GITHUB_ENV
 
-          echo "CFLAGS=-fPIC -O2" >> $GITHUB_ENV
-          echo "LDFLAGS=-fPIC" >> $GITHUB_ENV
+          echo "CFLAGS=-fPIC -O2 -ftls-model=initial-exec -falign-functions=$TLS_ALIGN" >> $GITHUB_ENV
+          echo "LDFLAGS=-fPIC -ldl" >> $GITHUB_ENV
 
       - name: Build OpenSSL
         env:

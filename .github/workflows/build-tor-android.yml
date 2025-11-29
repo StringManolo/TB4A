@@ -158,7 +158,7 @@ jobs:
           $CC -c tor_tls_dummy.c -o tor_tls_dummy.o -fPIC -O2 -ftls-model=initial-exec
           ./autogen.sh
           export CFLAGS="-fPIC -O2 -ftls-model=initial-exec -pthread -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/libevent_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include -Wl,-z,max-page-size=16384"
-          export LDFLAGS="-fPIC -pie -pthread -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/libevent_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib -ldl"
+          export LDFLAGS="-fPIC -pie -pthread -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/libevent_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib -ldl -Wl,-u,tor_force_tls_dummy -Wl,-z,max-page-size=16384"
           export LIBS="$PWD/tor_tls_dummy.o"
           ./configure --host="$HOST_TRIPLE" --prefix="$BUILD_ROOT/tor_install" --disable-asciidoc --enable-static-tor --with-openssl-dir="$BUILD_ROOT/openssl_install" --with-libevent-dir="$BUILD_ROOT/libevent_install" --with-zlib-dir="$BUILD_ROOT/zlib_install" --with-lzma-dir="$BUILD_ROOT/xz_install" --disable-tool-name-check --disable-zstd
           make -j$(nproc)

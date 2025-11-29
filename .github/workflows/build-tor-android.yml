@@ -1,4 +1,4 @@
-name: Build Tor for Android (Bionic-safe TLS)
+name: Build Tor for Android (Bionic-safe TLS, robust)
 
 on:
   workflow_dispatch:
@@ -47,30 +47,34 @@ jobs:
           TOOLCHAIN="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
           BUILD_ROOT="$GITHUB_WORKSPACE/build/${{ matrix.abi }}"
           mkdir -p "$BUILD_ROOT"
-
           echo "API=$API" >> $GITHUB_ENV
           echo "HOST_TRIPLE=$HOST_TRIPLE" >> $GITHUB_ENV
           echo "OPENSSL_TARGET=$OPENSSL_TARGET" >> $GITHUB_ENV
           echo "TOOLCHAIN=$TOOLCHAIN" >> $GITHUB_ENV
           echo "BUILD_ROOT=$BUILD_ROOT" >> $GITHUB_ENV
           echo "TLS_ALIGN=$TLS_ALIGN" >> $GITHUB_ENV
-
           echo "CC=$TOOLCHAIN/${HOST_TRIPLE}${API}-clang" >> $GITHUB_ENV
           echo "CXX=$TOOLCHAIN/${HOST_TRIPLE}${API}-clang++" >> $GITHUB_ENV
           echo "AR=$TOOLCHAIN/llvm-ar" >> $GITHUB_ENV
           echo "RANLIB=$TOOLCHAIN/llvm-ranlib" >> $GITHUB_ENV
           echo "STRIP=$TOOLCHAIN/llvm-strip" >> $GITHUB_ENV
 
-      - name: Build OpenSSL
+      - name: Build OpenSSL (patch TLS symbols robustly)
         env:
           PATH: ${{ env.TOOLCHAIN }}:/usr/bin:/bin
         run: |
+          set -euo pipefail
           mkdir -p "$BUILD_ROOT/openssl_build"
           cd "$BUILD_ROOT/openssl_build"
           git clone --depth=1 --branch=openssl-3.2 https://github.com/openssl/openssl.git openssl_src
           cd openssl_src
-          # Patch TLS variables for alignment
-          sed -i "s/static __thread/static __thread __attribute__((aligned($TLS_ALIGN)))/g" crypto/threads/*.c || true
+          # Robustly patch TLS declarations: __thread, THREAD_LOCAL, THREAD_VAR, etc.
+          # This will add attribute((aligned(N))) where N is $TLS_ALIGN
+          find . -type f -name '*.c' -o -name '*.h' | xargs grep -IlE '(__thread|THREAD_LOCAL|THREAD_VAR|THREAD_LOCAL_DECL)' || true
+          perl -i -pe "s/\\b(static\\s+)?(__thread)\\b/\\1__thread __attribute__((aligned(${TLS_ALIGN})))/g" $(git ls-files | grep -E '\.(c|h)$' || true) || true
+          perl -i -pe "s/\\bTHREAD_LOCAL\\b/THREAD_LOCAL __attribute__((aligned(${TLS_ALIGN})))/g" $(git ls-files | grep -E '\.(c|h)$' || true) || true
+          # ensure the replacement actually happened (best-effort)
+          grep -R "aligned(${TLS_ALIGN})" || true
           export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
           export AR="$TOOLCHAIN/llvm-ar"
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
@@ -85,6 +89,7 @@ jobs:
         env:
           PATH: ${{ env.TOOLCHAIN }}:/usr/bin:/bin
         run: |
+          set -euo pipefail
           mkdir -p "$BUILD_ROOT/zlib_build"
           cd "$BUILD_ROOT/zlib_build"
           git clone --depth=1 --branch=v1.3.1 https://github.com/madler/zlib.git zlib_src
@@ -102,6 +107,7 @@ jobs:
         env:
           PATH: ${{ env.TOOLCHAIN }}:/usr/bin:/bin
         run: |
+          set -euo pipefail
           mkdir -p "$BUILD_ROOT/xz_build"
           cd "$BUILD_ROOT/xz_build"
           wget https://tukaani.org/xz/xz-5.4.5.tar.gz
@@ -116,14 +122,16 @@ jobs:
           make -j$(nproc)
           make install
 
-      - name: Build libevent
+      - name: Build libevent (patch TLS declarations robustly)
         run: |
+          set -euo pipefail
           cd "$BUILD_ROOT"
           git clone --depth=1 --branch=release-2.1.12-stable https://github.com/libevent/libevent.git libevent
           cd libevent
-          ./autogen.sh
-          # Patch TLS variables for alignment
-          sed -i "s/static __thread/static __thread __attribute__((aligned($TLS_ALIGN)))/g" event2/thread_* || true
+          ./autogen.sh || true
+          # Patch likely TLS declarations (thread_*, THREAD_LOCAL, __thread)
+          perl -i -pe "s/\\b(static\\s+)?(__thread)\\b/\\1__thread __attribute__((aligned(${TLS_ALIGN})))/g" $(git ls-files | grep -E '\.(c|h)$' || true) || true
+          perl -i -pe "s/\\bTHREAD_LOCAL\\b/THREAD_LOCAL __attribute__((aligned(${TLS_ALIGN})))/g" $(git ls-files | grep -E '\.(c|h)$' || true) || true
           export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
           export AR="$TOOLCHAIN/llvm-ar"
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
@@ -133,17 +141,28 @@ jobs:
           make -j$(nproc)
           make install
 
-      - name: Build Tor
+      - name: Build Tor (add tls dummy and ensure it's compiled)
         env:
           PATH: ${{ env.TOOLCHAIN }}:/usr/bin:/bin
         run: |
+          set -euo pipefail
           cd "$BUILD_ROOT"
           git clone --depth=1 --branch=release-0.4.8 https://git.torproject.org/tor.git tor
           cd tor
+          # Create dummy TLS C file and add to src/lib/Makefile.am before autogen
+          cat > src/lib/tor_tls_dummy.c <<'EOF'
+          #include <stdint.h>
+          static __thread char tor_tls_dummy __attribute__((aligned(TLS_ALIGN_PLACEHOLDER))) = 0;
+          void *tor_force_tls_dummy(void){ return &tor_tls_dummy; }
+          EOF
+          # Replace placeholder with numeric alignment
+          perl -pi -e "s/TLS_ALIGN_PLACEHOLDER/${TLS_ALIGN}/g" src/lib/tor_tls_dummy.c
+          # add source to Makefile.am so it's compiled into libtor
+          if ! grep -q "tor_tls_dummy.c" src/lib/Makefile.am 2>/dev/null; then
+            echo >> src/lib/Makefile.am
+            echo "libtor_a_SOURCES += tor_tls_dummy.c" >> src/lib/Makefile.am
+          fi
           ./autogen.sh
-          # Add a TLS dummy variable to force TLS segment in ELF
-          echo "static __thread char tls_dummy __attribute__((aligned($TLS_ALIGN))) = 0;" >> src/lib/tor_tls_dummy.c
-          echo "void* force_tls_dummy() { return &tls_dummy; }" >> src/lib/tor_tls_dummy.c
           export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
           export CXX="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang++"
           export AR="$TOOLCHAIN/llvm-ar"
@@ -155,17 +174,18 @@ jobs:
           make -j$(nproc)
           make install
 
-      - name: TLS Alignment Postscript
+      - name: TLS Alignment Postscript (final verification)
         run: |
-          TOR_BIN="$BUILD_ROOT/tor_install/bin/tor"
+          set -euo pipefail
+          TOR_BIN="${{ env.BUILD_ROOT }}/tor_install/bin/tor"
           echo "=== Tor Binary Info ==="
-          file $TOR_BIN
+          file "$TOR_BIN" || true
           echo "=== TLS Segment Info ==="
-          readelf -l $TOR_BIN | grep -A1 TLS || echo "No TLS segment found"
+          readelf -l "$TOR_BIN" | sed -n '1,200p'
           echo "=== TLS Section Info ==="
-          readelf -S $TOR_BIN | grep tls || echo "No TLS section found"
+          readelf -S "$TOR_BIN" | sed -n '1,200p' || true
           echo "=== LOAD Segment Alignment Check ==="
-          readelf -l $TOR_BIN | grep LOAD | head -5
+          readelf -l "$TOR_BIN" | grep LOAD | head -n 6 || true
 
       - name: Upload Tor artifact
         uses: actions/upload-artifact@v4

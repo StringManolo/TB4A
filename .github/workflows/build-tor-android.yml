@@ -76,10 +76,10 @@ jobs:
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
           export STRIP="$TOOLCHAIN/llvm-strip"
 
-          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic -Wl,-z,max-page-size=16384"
-          export LDFLAGS="-fPIC -pie -Wl,-z,max-page-size=16384 -ldl"
+          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic -pthread -Wl,-z,max-page-size=16384"
+          export LDFLAGS="-fPIC -pie -pthread -Wl,-z,max-page-size=16384 -ldl"
 
-          ./Configure "$OPENSSL_TARGET" no-shared no-tests no-threads no-async -D__ANDROID_API__=$API --prefix="$BUILD_ROOT/openssl_install"
+          ./Configure "$OPENSSL_TARGET" no-shared no-tests -D__ANDROID_API__=$API --prefix="$BUILD_ROOT/openssl_install"
           make -j$(nproc)
           make install_sw
 
@@ -125,8 +125,8 @@ jobs:
 
           ./autogen.sh
 
-          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include -Wl,-z,max-page-size=16384"
-          export LDFLAGS="-fPIC -pie -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib -ldl"
+          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic -pthread -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include -Wl,-z,max-page-size=16384"
+          export LDFLAGS="-fPIC -pie -pthread -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib -ldl"
           export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
           export AR="$TOOLCHAIN/llvm-ar"
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
@@ -172,8 +172,8 @@ jobs:
 
           ./autogen.sh
 
-          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/libevent_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include -Wl,-z,max-page-size=16384"
-          export LDFLAGS="-fPIC -pie -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/libevent_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib -ldl"
+          export CFLAGS="-fPIC -O2 -ftls-model=global-dynamic -pthread -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/libevent_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include -Wl,-z,max-page-size=16384"
+          export LDFLAGS="-fPIC -pie -pthread -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/libevent_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib -ldl"
           export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
           export CXX="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang++"
           export AR="$TOOLCHAIN/llvm-ar"
@@ -206,14 +206,6 @@ jobs:
           readelf -S $TOR_BIN | grep tls || echo "No TLS section found"
           echo "=== LOAD Segment Alignment Check ==="
           readelf -l $TOR_BIN | grep LOAD | head -5
-          TLS_SEG_OFFSET=$(readelf -l $TOR_BIN | awk '/TLS/{getline; print $2}')
-          echo "TLS segment offset in file: $TLS_SEG_OFFSET"
-          echo "Minimum required alignment: $TLS_ALIGN"
-          if [ $TLS_SEG_OFFSET -eq 0 ]; then
-            echo "Warning: TLS segment may not be aligned correctly!"
-          else
-            echo "TLS segment alignment looks OK (verify LOAD addresses)."
-          fi
 
       - name: Upload Tor artifact
         uses: actions/upload-artifact@v4

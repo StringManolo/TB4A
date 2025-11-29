@@ -61,7 +61,7 @@ jobs:
           echo "RANLIB=$TOOLCHAIN/llvm-ranlib" >> $GITHUB_ENV
           echo "STRIP=$TOOLCHAIN/llvm-strip" >> $GITHUB_ENV
 
-      - name: Build OpenSSL with TLS alignment
+      - name: Build OpenSSL
         env:
           PATH: ${{ env.TOOLCHAIN }}:/usr/bin:/bin
         run: |
@@ -69,7 +69,7 @@ jobs:
           cd "$BUILD_ROOT/openssl_build"
           git clone --depth=1 --branch=openssl-3.2 https://github.com/openssl/openssl.git openssl_src
           cd openssl_src
-          # Patch TLS variables to force alignment
+          # Patch TLS variables for alignment
           sed -i "s/static __thread/static __thread __attribute__((aligned($TLS_ALIGN)))/g" crypto/threads/*.c || true
           export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
           export AR="$TOOLCHAIN/llvm-ar"
@@ -116,13 +116,13 @@ jobs:
           make -j$(nproc)
           make install
 
-      - name: Build libevent with TLS alignment
+      - name: Build libevent
         run: |
           cd "$BUILD_ROOT"
           git clone --depth=1 --branch=release-2.1.12-stable https://github.com/libevent/libevent.git libevent
           cd libevent
           ./autogen.sh
-          # Patch TLS variables
+          # Patch TLS variables for alignment
           sed -i "s/static __thread/static __thread __attribute__((aligned($TLS_ALIGN)))/g" event2/thread_* || true
           export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
           export AR="$TOOLCHAIN/llvm-ar"
@@ -141,6 +141,9 @@ jobs:
           git clone --depth=1 --branch=release-0.4.8 https://git.torproject.org/tor.git tor
           cd tor
           ./autogen.sh
+          # Add a TLS dummy variable to force TLS segment in ELF
+          echo "static __thread char tls_dummy __attribute__((aligned($TLS_ALIGN))) = 0;" >> src/lib/tor_tls_dummy.c
+          echo "void* force_tls_dummy() { return &tls_dummy; }" >> src/lib/tor_tls_dummy.c
           export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
           export CXX="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang++"
           export AR="$TOOLCHAIN/llvm-ar"

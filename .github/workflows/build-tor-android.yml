@@ -1,4 +1,3 @@
-
 name: Build Tor for Android (ARM only)
 
 on:
@@ -52,12 +51,10 @@ jobs:
     - name: Configure and build for ${{ matrix.arch }}
       run: |
         cd tor-src
-
+        
         echo "🔧 Checking build scripts..."
         echo "📁 Current directory: $(pwd)"
-        echo "📁 Files in current directory:"
-        ls -la
-
+        
         # El tarball oficial ya incluye configure, no necesita autogen.sh
         if [ -f "./configure" ]; then
           echo "✅ Configure script found, making executable..."
@@ -74,7 +71,7 @@ jobs:
             ;;
           armeabi-v7a)
             export HOST="armv7a-linux-androideabi"
-            export API_LEVEL="16"
+            export API_LEVEL="21"  # Cambiado de 16 a 21 (mínimo disponible en este NDK)
             ;;
         esac
 
@@ -84,7 +81,7 @@ jobs:
           # Fallback: buscar NDK en la ubicación estándar
           export ANDROID_NDK_HOME="/usr/local/lib/android/sdk/ndk/$(ls /usr/local/lib/android/sdk/ndk/ | head -1)"
         fi
-
+        
         export TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
         export CC="$TOOLCHAIN/bin/${HOST}${API_LEVEL}-clang"
         export CXX="$TOOLCHAIN/bin/${HOST}${API_LEVEL}-clang++"
@@ -105,7 +102,7 @@ jobs:
         if [ ! -f "$CC" ]; then
           echo "❌ Compiler not found: $CC"
           echo "📁 Toolchain contents:"
-          ls -la "$TOOLCHAIN/bin/" || echo "Toolchain directory not found"
+          ls -la "$TOOLCHAIN/bin/" | grep "$HOST" || echo "No compilers found for $HOST"
           exit 1
         fi
 
@@ -123,10 +120,10 @@ jobs:
           --enable-seccomp=no \
           --enable-libscrypt=no \
           --enable-tool-name-check=no
-
+        
         echo "🔨 Compiling Tor..."
         make -j2
-
+        
         echo "✅ Build completed for ${{ matrix.arch }}"
 
     - name: Verify binary
@@ -165,7 +162,7 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     if: startsWith(github.ref, 'refs/tags/tor-')
-
+    
     steps:
     - name: Download all artifacts
       uses: actions/download-artifact@v4
@@ -187,12 +184,13 @@ jobs:
         release_name: Tor ${{ env.TOR_VERSION }} for Android
         body: |
           Tor ${{ env.TOR_VERSION }} compiled for Android
-
+          
           Architectures included:
           - arm64-v8a (modern devices)
           - armeabi-v7a (legacy devices)
-
+          
           Built with preinstalled Android NDK on GitHub Actions
+          Minimum API Level: 21
         draft: false
         prerelease: false
 

@@ -75,7 +75,7 @@ jobs:
           export STRIP="$TOOLCHAIN/llvm-strip"
           export CFLAGS="-fPIC -O2 -ftls-model=initial-exec -pthread -Wl,-z,max-page-size=16384"
           export LDFLAGS="-fPIC -pie -pthread -Wl,-z,max-page-size=16384 -ldl"
-          ./Configure "$OPENSSL_TARGET" no-shared no-tests -D__ANDROID_API__=$API --prefix="$BUILD_ROOT/openssl_install"
+          ./Configure "$OPENSSL_TARGET" no-shared -D__ANDROID_API__=$API --prefix="$BUILD_ROOT/openssl_install"
           make -j$(nproc)
           make install_sw
 

@@ -89,7 +89,6 @@ jobs:
         run: |
           mkdir -p "$BUILD_ROOT/xz_build"
           cd "$BUILD_ROOT/xz_build"
-          # Usar una versión específica que sabemos que funciona
           wget https://tukaani.org/xz/xz-5.4.5.tar.gz
           tar -xzf xz-5.4.5.tar.gz
           cd xz-5.4.5
@@ -176,6 +175,7 @@ jobs:
             --with-zlib-dir="$BUILD_ROOT/zlib_install" \
             --with-lzma-dir="$BUILD_ROOT/xz_install" \
             --disable-tool-name-check \
+            --disable-zstd \
             CFLAGS="$CFLAGS -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/libevent_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include" \
             LDFLAGS="$LDFLAGS -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/libevent_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib"
 

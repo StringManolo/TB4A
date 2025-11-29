@@ -1,11 +1,11 @@
 name: Build Tor for Android
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - 'tor/**'
       - '.github/workflows/build-android-tor.yml'
-  workflow_dispatch:
 
 jobs:
   build:
@@ -14,32 +14,32 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch: [arm64-v8a, armeabi-v7a]
+        abi: [arm64-v8a, armeabi-v7a]
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up NDK
+      - name: Set up Android NDK
         id: setup-ndk
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r27c
           add-to-path: true
 
-      - name: Install Dependencies
+      - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential autoconf automake libtool pkg-config \
-            gettext git cmake ninja-build ccache zlib1g-dev
+            cmake ninja-build gettext git zlib1g-dev
 
-      - name: Set Build Variables
+      - name: Set environment variables
         run: |
           export ANDROID_NDK_HOME="${{ steps.setup-ndk.outputs.ndk-home }}"
           export API=21
 
-          case "${{ matrix.arch }}" in
+          case "${{ matrix.abi }}" in
             arm64-v8a)
               HOST_TRIPLE="aarch64-linux-android"
               OPENSSL_TARGET="android-arm64"
@@ -53,13 +53,13 @@ jobs:
           TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
 
           echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> $GITHUB_ENV
+          echo "API=$API" >> $GITHUB_ENV
           echo "HOST_TRIPLE=$HOST_TRIPLE" >> $GITHUB_ENV
           echo "OPENSSL_TARGET=$OPENSSL_TARGET" >> $GITHUB_ENV
-          echo "API=$API" >> $GITHUB_ENV
           echo "TOOLCHAIN=$TOOLCHAIN" >> $GITHUB_ENV
 
-          echo "CC=$TOOLCHAIN/$HOST_TRIPLE$API-clang" >> $GITHUB_ENV
-          echo "CXX=$TOOLCHAIN/$HOST_TRIPLE$API-clang++" >> $GITHUB_ENV
+          echo "CC=$TOOLCHAIN/${HOST_TRIPLE}${API}-clang" >> $GITHUB_ENV
+          echo "CXX=$TOOLCHAIN/${HOST_TRIPLE}${API}-clang++" >> $GITHUB_ENV
           echo "AR=$TOOLCHAIN/llvm-ar" >> $GITHUB_ENV
           echo "RANLIB=$TOOLCHAIN/llvm-ranlib" >> $GITHUB_ENV
           echo "STRIP=$TOOLCHAIN/llvm-strip" >> $GITHUB_ENV
@@ -67,11 +67,11 @@ jobs:
           echo "CFLAGS=-fPIC -O2 -D__ANDROID_API__=$API" >> $GITHUB_ENV
           echo "LDFLAGS=-fPIC" >> $GITHUB_ENV
 
-          echo "BUILD_ROOT=$GITHUB_WORKSPACE/build/${{ matrix.arch }}" >> $GITHUB_ENV
+          echo "BUILD_ROOT=$GITHUB_WORKSPACE/build/${{ matrix.abi }}" >> $GITHUB_ENV
 
-      # -------------------------------------------------
+      # ----------------------------------------------------
       # Build OpenSSL
-      # -------------------------------------------------
+      # ----------------------------------------------------
       - name: Build OpenSSL
         env:
           CC: ${{ env.CC }}
@@ -80,23 +80,23 @@ jobs:
           RANLIB: ${{ env.RANLIB }}
           CFLAGS: ${{ env.CFLAGS }}
           LDFLAGS: ${{ env.LDFLAGS }}
-          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
         run: |
-          mkdir -p $BUILD_ROOT
-          cd $BUILD_ROOT
+          mkdir -p "$BUILD_ROOT"
+          cd "$BUILD_ROOT"
+
           git clone https://github.com/openssl/openssl.git --depth=1 --branch=openssl-3.2 openssl-src
           cd openssl-src
 
-          ./Configure $OPENSSL_TARGET no-shared no-tests \
-            --prefix=$BUILD_ROOT/openssl \
+          ./Configure "$OPENSSL_TARGET" no-shared no-tests \
+            --prefix="$BUILD_ROOT/openssl" \
             -D__ANDROID_API__=$API -fPIC
 
           make -j$(nproc)
           make install_sw
 
-      # -------------------------------------------------
+      # ----------------------------------------------------
       # Build libevent
-      # -------------------------------------------------
+      # ----------------------------------------------------
       - name: Build libevent
         env:
           CC: ${{ env.CC }}
@@ -106,56 +106,60 @@ jobs:
           CFLAGS: ${{ env.CFLAGS }} -I${{ env.BUILD_ROOT }}/openssl/include
           LDFLAGS: ${{ env.LDFLAGS }} -L${{ env.BUILD_ROOT }}/openssl/lib
         run: |
-          cd $BUILD_ROOT
+          cd "$BUILD_ROOT"
           git clone https://github.com/libevent/libevent.git --depth=1 --branch=release-2.1.12-stable libevent-src
           cd libevent-src
 
           ./autogen.sh
           ./configure \
-            --host=$HOST_TRIPLE \
-            --prefix=$BUILD_ROOT/libevent \
+            --host="$HOST_TRIPLE" \
+            --prefix="$BUILD_ROOT/libevent" \
             --disable-shared \
             --enable-static \
-            --disable-samples \
-            --disable-debug
+            --disable-debug \
+            --disable-samples
 
           make -j$(nproc)
           make install
 
-      # -------------------------------------------------
+      # ----------------------------------------------------
       # Build Tor
-      # -------------------------------------------------
+      # ----------------------------------------------------
       - name: Build Tor
         env:
           CC: ${{ env.CC }}
           CXX: ${{ env.CXX }}
           AR: ${{ env.AR }}
           RANLIB: ${{ env.RANLIB }}
-          CFLAGS: ${{ env.CFLAGS }} -I${{ env.BUILD_ROOT }}/openssl/include -I${{ env.BUILD_ROOT }}/libevent/include
-          LDFLAGS: ${{ env.LDFLAGS }} -L${{ env.BUILD_ROOT }}/openssl/lib -L${{ env.BUILD_ROOT }}/libevent/lib
+          CFLAGS: ${{ env.CFLAGS }} \
+            -I${{ env.BUILD_ROOT }}/openssl/include \
+            -I${{ env.BUILD_ROOT }}/libevent/include
+          LDFLAGS: ${{ env.LDFLAGS }} \
+            -L${{ env.BUILD_ROOT }}/openssl/lib \
+            -L${{ env.BUILD_ROOT }}/libevent/lib
         run: |
-          cd $BUILD_ROOT
+          cd "$BUILD_ROOT"
           git clone https://git.torproject.org/tor.git --depth=1 --branch=release-0.4.8 tor-src
           cd tor-src
 
           ./autogen.sh
           ./configure \
-            --host=$HOST_TRIPLE \
-            --prefix=$BUILD_ROOT/tor \
-            --enable-static-tor \
+            --host="$HOST_TRIPLE" \
+            --prefix="$BUILD_ROOT/tor" \
             --disable-asciidoc \
-            --with-openssl-dir=$BUILD_ROOT/openssl \
-            --with-libevent-dir=$BUILD_ROOT/libevent
+            --enable-static-tor \
+            --with-openssl-dir="$BUILD_ROOT/openssl" \
+            --with-libevent-dir="$BUILD_ROOT/libevent"
 
           make -j$(nproc)
           make install
 
-      # -------------------------------------------------
-      # Upload
-      # -------------------------------------------------
-      - name: Upload Artifacts
+      # ----------------------------------------------------
+      # Upload Tor build artifacts
+      # ----------------------------------------------------
+      - name: Upload Tor Result
         uses: actions/upload-artifact@v4
         with:
-          name: tor-${{ matrix.arch }}
+          name: tor-${{ matrix.abi }}
           path: ${{ env.BUILD_ROOT }}/tor
 

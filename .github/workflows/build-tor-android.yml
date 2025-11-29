@@ -59,7 +59,7 @@ jobs:
           perl
         echo "✅ Dependencies installed"
 
-    - name: Setup environment for ${{ matrix.arch }}
+    - name: Setup environment for ${{ matrix.arch }} (Corrected)
       id: setup_env
       run: |
         case "${{ matrix.arch }}" in
@@ -86,15 +86,19 @@ jobs:
 
         SYSROOT="$TOOLCHAIN_LLVM/sysroot"
         
-        echo "CC=$TOOLCHAIN_LLVM/bin/clang" >> $GITHUB_ENV
-        echo "CXX=$TOOLCHAIN_LLVM/bin/clang++" >> $GITHUB_ENV
+        # 🔑 Corrección clave: Definir CC/CXX apuntando al wrapper específico del NDK 
+        # (ej: armv7a-linux-androideabi21-clang)
+        echo "CC=$TOOLCHAIN_LLVM/bin/${{ env.TARGET_TRIPLET }}${{ env.API_LEVEL }}-clang" >> $GITHUB_ENV
+        echo "CXX=$TOOLCHAIN_LLVM/bin/${{ env.TARGET_TRIPLET }}${{ env.API_LEVEL }}-clang++" >> $GITHUB_ENV
         
+        # Corrección de TARGET_FLAGS para que no esté vacío.
         echo "TARGET_FLAGS=-target ${{ env.TARGET_TRIPLET }}${{ env.API_LEVEL }} --sysroot=$SYSROOT" >> $GITHUB_ENV
         
         echo "AR=$TOOLCHAIN_LLVM/bin/llvm-ar" >> $GITHUB_ENV
         echo "RANLIB=$TOOLCHAIN_LLVM/bin/llvm-ranlib" >> $GITHUB_ENV
         echo "STRIP=$TOOLCHAIN_LLVM/bin/llvm-strip" >> $GITHUB_ENV
         
+        # 🔑 Corrección clave: Añadir el directorio bin de LLVM al PATH para que OpenSSL encuentre el compilador.
         echo "PATH=$TOOLCHAIN_LLVM/bin:$PATH" >> $GITHUB_ENV
         echo "INSTALL_DIR=$(pwd)/install/${{ matrix.arch }}" >> $GITHUB_ENV
         

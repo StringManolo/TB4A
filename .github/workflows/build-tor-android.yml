@@ -115,6 +115,7 @@ jobs:
             --prefix="$BUILD_ROOT/tor_install" \
             --disable-asciidoc \
             --enable-static-tor \
+            --disable-tool-name-check \
             --with-openssl-dir="$BUILD_ROOT/openssl_install" \
             --with-libevent-dir="$BUILD_ROOT/libevent_install" \
             CFLAGS="$CFLAGS -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/libevent_install/include" \

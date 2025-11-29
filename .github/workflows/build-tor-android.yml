@@ -101,6 +101,28 @@ jobs:
           make -j$(nproc)
           make install
 
+      - name: Build zlib
+        env:
+          PATH: ${{ env.TOOLCHAIN }}:/usr/bin:/bin
+        run: |
+          mkdir -p "$BUILD_ROOT/zlib_build"
+          cd "$BUILD_ROOT/zlib_build"
+          git clone https://github.com/madler/zlib.git --depth=1 --branch=v1.3.1 zlib_src
+          cd zlib_src
+
+          export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
+          export CXX="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang++"
+          export AR="$TOOLCHAIN/llvm-ar"
+          export RANLIB="$TOOLCHAIN/llvm-ranlib"
+          export STRIP="$TOOLCHAIN/llvm-strip"
+          export CFLAGS="$CFLAGS"
+          export LDFLAGS="$LDFLAGS"
+
+          ./configure --static --prefix="$BUILD_ROOT/zlib_install"
+
+          make -j$(nproc)
+          make install
+
       - name: Build Tor
         env:
           PATH: ${{ env.TOOLCHAIN }}:/usr/bin:/bin
@@ -115,11 +137,12 @@ jobs:
             --prefix="$BUILD_ROOT/tor_install" \
             --disable-asciidoc \
             --enable-static-tor \
-            --disable-tool-name-check \
             --with-openssl-dir="$BUILD_ROOT/openssl_install" \
             --with-libevent-dir="$BUILD_ROOT/libevent_install" \
-            CFLAGS="$CFLAGS -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/libevent_install/include" \
-            LDFLAGS="$LDFLAGS -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/libevent_install/lib"
+            --with-zlib-dir="$BUILD_ROOT/zlib_install" \
+            --disable-tool-name-check \
+            CFLAGS="$CFLAGS -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/libevent_install/include -I$BUILD_ROOT/zlib_install/include" \
+            LDFLAGS="$LDFLAGS -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/libevent_install/lib -L$BUILD_ROOT/zlib_install/lib"
 
           make -j$(nproc)
           make install
@@ -129,4 +152,3 @@ jobs:
         with:
           name: tor-${{ matrix.abi }}
           path: ${{ env.BUILD_ROOT }}/tor_install
-

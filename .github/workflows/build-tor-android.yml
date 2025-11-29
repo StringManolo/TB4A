@@ -32,12 +32,12 @@ jobs:
         wget -q https://dist.torproject.org/tor-${{ env.TOR_VERSION }}.tar.gz
         tar -xzf tor-${{ env.TOR_VERSION }}.tar.gz
         mv tor-${{ env.TOR_VERSION }} tor-src
-        
+
         echo "📥 Downloading OpenSSL source..."
         wget -q https://www.openssl.org/source/openssl-${{ env.OPENSSL_VERSION }}.tar.gz
         tar -xzf openssl-${{ env.OPENSSL_VERSION }}.tar.gz
         mv openssl-${{ env.OPENSSL_VERSION }} openssl-src
-        
+
         echo "📥 Downloading libevent source..."
         wget -q https://github.com/libevent/libevent/releases/download/release-${{ env.LIBEVENT_VERSION }}/libevent-${{ env.LIBEVENT_VERSION }}.tar.gz
         tar -xzf libevent-${{ env.LIBEVENT_VERSION }}.tar.gz
@@ -59,7 +59,7 @@ jobs:
           perl
         echo "✅ Dependencies installed"
 
-    - name: Setup environment for ${{ matrix.arch }} (Corrected)
+    - name: Setup environment for ${{ matrix.arch }}
       id: setup_env
       run: |
         case "${{ matrix.arch }}" in
@@ -80,39 +80,39 @@ jobs:
           export ANDROID_NDK_HOME="/usr/local/lib/android/sdk/ndk/$(ls /usr/local/lib/android/sdk/ndk/ | head -1)"
         fi
         echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> $GITHUB_ENV
-        
+
         TOOLCHAIN_LLVM="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
         echo "TOOLCHAIN=$TOOLCHAIN_LLVM" >> $GITHUB_ENV
 
         SYSROOT="$TOOLCHAIN_LLVM/sysroot"
-        
-        # 🔑 Corrección clave: Definir CC/CXX apuntando al wrapper específico del NDK 
-        # (ej: armv7a-linux-androideabi21-clang)
-        echo "CC=$TOOLCHAIN_LLVM/bin/${{ env.TARGET_TRIPLET }}${{ env.API_LEVEL }}-clang" >> $GITHUB_ENV
-        echo "CXX=$TOOLCHAIN_LLVM/bin/${{ env.TARGET_TRIPLET }}${{ env.API_LEVEL }}-clang++" >> $GITHUB_ENV
-        
-        # Corrección de TARGET_FLAGS para que no esté vacío.
-        echo "TARGET_FLAGS=-target ${{ env.TARGET_TRIPLET }}${{ env.API_LEVEL }} --sysroot=$SYSROOT" >> $GITHUB_ENV
-        
+
+        # 🔑 FIXED: Use the actual TARGET_TRIPLET and API_LEVEL variables
+        echo "CC=$TOOLCHAIN_LLVM/bin/${TARGET_TRIPLET}${API_LEVEL}-clang" >> $GITHUB_ENV
+        echo "CXX=$TOOLCHAIN_LLVM/bin/${TARGET_TRIPLET}${API_LEVEL}-clang++" >> $GITHUB_ENV
+
+        # FIXED: Include the target triplet in TARGET_FLAGS
+        echo "TARGET_FLAGS=-target ${TARGET_TRIPLET}${API_LEVEL} --sysroot=$SYSROOT" >> $GITHUB_ENV
+
         echo "AR=$TOOLCHAIN_LLVM/bin/llvm-ar" >> $GITHUB_ENV
         echo "RANLIB=$TOOLCHAIN_LLVM/bin/llvm-ranlib" >> $GITHUB_ENV
         echo "STRIP=$TOOLCHAIN_LLVM/bin/llvm-strip" >> $GITHUB_ENV
-        
-        # 🔑 Corrección clave: Añadir el directorio bin de LLVM al PATH para que OpenSSL encuentre el compilador.
+
+        # Add LLVM bin directory to PATH
         echo "PATH=$TOOLCHAIN_LLVM/bin:$PATH" >> $GITHUB_ENV
         echo "INSTALL_DIR=$(pwd)/install/${{ matrix.arch }}" >> $GITHUB_ENV
-        
-        echo "CPPFLAGS=-I${{ env.INSTALL_DIR }}/include ${{ env.TARGET_FLAGS }}" >> $GITHUB_ENV
-        echo "LDFLAGS=-L${{ env.INSTALL_DIR }}/lib ${{ env.TARGET_FLAGS }}" >> $GITHUB_ENV
-        echo "CFLAGS=${{ env.TARGET_FLAGS }}" >> $GITHUB_ENV
-        echo "CXXFLAGS=${{ env.TARGET_FLAGS }}" >> $GITHUB_ENV
+
+        # FIXED: Use the actual INSTALL_DIR variable
+        echo "CPPFLAGS=-I${INSTALL_DIR}/include ${TARGET_FLAGS}" >> $GITHUB_ENV
+        echo "LDFLAGS=-L${INSTALL_DIR}/lib ${TARGET_FLAGS}" >> $GITHUB_ENV
+        echo "CFLAGS=${TARGET_FLAGS}" >> $GITHUB_ENV
+        echo "CXXFLAGS=${TARGET_FLAGS}" >> $GITHUB_ENV
 
     - name: Configure and build OpenSSL for ${{ matrix.arch }}
       run: |
         echo "🏗️ Building OpenSSL for ${{ matrix.arch }}..."
-        
+
         cd openssl-src
-        
+
         case "${{ matrix.arch }}" in
           arm64-v8a)
             TARGET_CONFIG="android-arm64"
@@ -131,11 +131,11 @@ jobs:
           --prefix=${{ env.INSTALL_DIR }} \
           -D__ANDROID_API__=${{ env.API_LEVEL }} \
           -fPIC
-          
+
         echo "🔨 Compiling and installing OpenSSL..."
         make -j2
         make install_sw
-        
+
         echo "✅ OpenSSL compiled and installed"
 
     - name: Configure and build libevent for ${{ matrix.arch }}
@@ -143,7 +143,7 @@ jobs:
         echo "🏗️ Building libevent for ${{ matrix.arch }}..."
 
         cd libevent-src
-        
+
         chmod +x ./configure
         ./configure \
           --host=${{ env.HOST }} \
@@ -153,11 +153,11 @@ jobs:
           --disable-samples \
           --enable-openssl \
           --with-openssl-dir=${{ env.INSTALL_DIR }}
-          
+
         echo "🔨 Compiling and installing libevent..."
         make -j2
         make install
-        
+
         echo "✅ libevent compiled and installed"
 
     - name: Configure and build Tor for ${{ matrix.arch }}
@@ -165,7 +165,7 @@ jobs:
         echo "🏗️ Building Tor for ${{ matrix.arch }}..."
 
         cd tor-src
-        
+
         chmod +x ./configure
         ./configure \
           --host=${{ env.HOST }} \
@@ -183,12 +183,12 @@ jobs:
           --with-libevent-dir=${{ env.INSTALL_DIR }} \
           --with-openssl-dir=${{ env.INSTALL_DIR }} \
           --prefix=${{ env.INSTALL_DIR }}
-          
+
         echo "🔨 Compiling Tor..."
         make -j2
-        
+
         echo "✅ Tor built successfully for ${{ matrix.arch }}"
-        
+
         echo "🔍 Checking resulting binary..."
         ls -la ${{ env.INSTALL_DIR }}/bin/tor
         ${{ env.STRIP }} ${{ env.INSTALL_DIR }}/bin/tor

@@ -24,9 +24,10 @@ jobs:
         ref: "tor-${{ env.TOR_VERSION }}"
 
     - name: Setup Android NDK
-      uses: android-actions/setup-android-ndk@v2
+      uses: nttld/setup-ndk@v1
       with:
         ndk-version: ${{ env.NDK_VERSION }}
+      id: ndk
 
     - name: Install build dependencies
       run: |
@@ -66,6 +67,10 @@ jobs:
         export PATH="$TOOLCHAIN/bin:$PATH"
 
         echo "Building Tor for ${{ matrix.arch }}..."
+        echo "NDK path: $ANDROID_NDK_HOME"
+        echo "Toolchain: $TOOLCHAIN"
+        echo "Compiler: $CC"
+
         ./configure \
           --host="$HOST" \
           --enable-static-libevent \
@@ -108,9 +113,6 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         path: downloaded-artifacts
-
-    - name: List downloaded files
-      run: find downloaded-artifacts -type f
 
     - name: Create Release
       id: create_release

@@ -145,24 +145,42 @@ jobs:
           cd "$BUILD_ROOT"
           git clone --depth=1 --branch=release-0.4.8 https://git.torproject.org/tor.git tor
           cd tor
-          cat > tor_tls_dummy.c <<EOF
-          #include <stdint.h>
-          __attribute__((aligned(${TLS_ALIGN})))
-          __thread char tor_tls_dummy_var[${TLS_ALIGN}] = {1};
-          void *tor_force_tls_dummy(void) { return (void*)&tor_tls_dummy_var; }
+          
+          # Patch all TLS variables in Tor source to force alignment
+          find . -type f \( -name '*.c' -o -name '*.h' \) -exec grep -l '__thread' {} \; | while read file; do
+            perl -i -pe "s/(__thread\\s+[^;]+)/\$1 __attribute__((aligned(${TLS_ALIGN})))/g unless /aligned\\(/" "$file"
+          done
+          
+          # Create a large aligned TLS variable to force section alignment
+          cat > src/lib/thread/tls_align.c <<EOF
+          #include "lib/thread/tls_align.h"
+          __attribute__((aligned(${TLS_ALIGN}), used, section(".tdata")))
+          __thread char tor_tls_alignment_anchor[${TLS_ALIGN}] = {0};
           EOF
+          
+          cat > src/lib/thread/tls_align.h <<EOF
+          #ifndef TOR_TLS_ALIGN_H
+          #define TOR_TLS_ALIGN_H
+          extern __thread char tor_tls_alignment_anchor[${TLS_ALIGN}];
+          #endif
+          EOF
+          
+          # Add to build system
+          echo "src/lib/thread/tls_align.c" >> src/lib/libtor.mk
           
           export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
           export CXX="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang++"
           export AR="$TOOLCHAIN/llvm-ar"
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
           export STRIP="$TOOLCHAIN/llvm-strip"
-          $CC -c tor_tls_dummy.c -o tor_tls_dummy.o -fPIC -O2 -ftls-model=initial-exec
+          
           ./autogen.sh
-          export CFLAGS="-fPIC -O2 -ftls-model=initial-exec -pthread -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/libevent_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include"
-          export LDFLAGS="-fPIC -pie -pthread -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/libevent_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib -ldl -Wl,-u,tor_force_tls_dummy -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"
-          export LIBS="$PWD/tor_tls_dummy.o"
+          
+          export CFLAGS="-fPIC -O2 -ftls-model=initial-exec -pthread -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/libevent_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include -Wl,-z,max-page-size=16384"
+          export LDFLAGS="-fPIC -pie -pthread -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/libevent_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib -ldl -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384 -Wl,--no-warn-mismatch"
+          
           ./configure --host="$HOST_TRIPLE" --prefix="$BUILD_ROOT/tor_install" --disable-asciidoc --enable-static-tor --with-openssl-dir="$BUILD_ROOT/openssl_install" --with-libevent-dir="$BUILD_ROOT/libevent_install" --with-zlib-dir="$BUILD_ROOT/zlib_install" --with-lzma-dir="$BUILD_ROOT/xz_install" --disable-tool-name-check --disable-zstd
+          
           make -j$(nproc)
           make install
 

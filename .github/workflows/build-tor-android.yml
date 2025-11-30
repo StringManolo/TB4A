@@ -147,18 +147,9 @@ jobs:
           cd tor
           cat > tor_tls_dummy.c <<EOF
           #include <stdint.h>
-          __thread char tor_tls_dummy_var __attribute__((aligned(${TLS_ALIGN}))) = 1;
+          __attribute__((aligned(${TLS_ALIGN})))
+          __thread char tor_tls_dummy_var[${TLS_ALIGN}] = {1};
           void *tor_force_tls_dummy(void) { return (void*)&tor_tls_dummy_var; }
-          EOF
-          
-          # Create linker script to force TLS alignment
-          cat > tls_align.ld <<EOF
-          SECTIONS
-          {
-            .tdata : ALIGN(${TLS_ALIGN}) { *(.tdata .tdata.* .gnu.linkonce.td.*) }
-            .tbss : ALIGN(${TLS_ALIGN}) { *(.tbss .tbss.* .gnu.linkonce.tb.*) *(.tcommon) }
-          }
-          INSERT AFTER .data;
           EOF
           
           export CC="$TOOLCHAIN/${HOST_TRIPLE}${API}-clang"
@@ -168,8 +159,8 @@ jobs:
           export STRIP="$TOOLCHAIN/llvm-strip"
           $CC -c tor_tls_dummy.c -o tor_tls_dummy.o -fPIC -O2 -ftls-model=initial-exec
           ./autogen.sh
-          export CFLAGS="-fPIC -O2 -ftls-model=initial-exec -pthread -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/libevent_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include -Wl,-z,max-page-size=16384"
-          export LDFLAGS="-fPIC -pie -pthread -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/libevent_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib -ldl -Wl,-u,tor_force_tls_dummy -Wl,-T,$PWD/tls_align.ld -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"
+          export CFLAGS="-fPIC -O2 -ftls-model=initial-exec -pthread -I$BUILD_ROOT/openssl_install/include -I$BUILD_ROOT/libevent_install/include -I$BUILD_ROOT/zlib_install/include -I$BUILD_ROOT/xz_install/include"
+          export LDFLAGS="-fPIC -pie -pthread -L$BUILD_ROOT/openssl_install/lib -L$BUILD_ROOT/libevent_install/lib -L$BUILD_ROOT/zlib_install/lib -L$BUILD_ROOT/xz_install/lib -ldl -Wl,-u,tor_force_tls_dummy -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"
           export LIBS="$PWD/tor_tls_dummy.o"
           ./configure --host="$HOST_TRIPLE" --prefix="$BUILD_ROOT/tor_install" --disable-asciidoc --enable-static-tor --with-openssl-dir="$BUILD_ROOT/openssl_install" --with-libevent-dir="$BUILD_ROOT/libevent_install" --with-zlib-dir="$BUILD_ROOT/zlib_install" --with-lzma-dir="$BUILD_ROOT/xz_install" --disable-tool-name-check --disable-zstd
           make -j$(nproc)
